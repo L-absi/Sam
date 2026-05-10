@@ -1,0 +1,29 @@
+name: Update Matches Every 5 Minutes
+
+on:
+  schedule:
+    # هذا الكود يعني التشغيل كل 5 دقائق
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # يتيح لك تشغيل السكربت يدوياً للتجربة
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Scraper
+        env:
+          FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
+        run: python new.py  # استبدل your_script_name باسم ملفك
