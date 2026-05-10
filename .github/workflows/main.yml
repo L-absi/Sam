@@ -3,7 +3,7 @@ name: Update Matches Every 5 Minutes
 on:
   schedule:
     # هذا الكود يعني التشغيل كل 5 دقائق
-    - cron: '*/5 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch: # يتيح لك تشغيل السكربت يدوياً للتجربة
 
 jobs:
