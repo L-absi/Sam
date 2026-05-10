@@ -6,18 +6,18 @@ from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager # مكتبة مهمة للتحميل التلقائي
- virtues BeautifulSoup
+from webdriver_manager.chrome import ChromeDriverManager
+from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
-# جلب رابط Firebase من متغيرات البيئة (أكثر أماناً)
+# جلب رابط Firebase من متغيرات البيئة
 FIREBASE_URL = os.getenv('FIREBASE_URL')
 
 def get_today_date():
     return datetime.now().strftime("%Y-%m-%d")
 
 def get_today_matches_url():
-    return "https://www.kooora.com/%D9%83%D8%B1%D8%A9-%D8%A7%D9%84%D9%82%D8%AF%D9%85/%D9%85%D8%A8%D8%A7%D8%B1%D9%8A%D8%A7%D8%AA-%D8%A7%D9%84%D9%82%D8%AF%D9%85"
+    return "https://www.kooora.com/%D9%83%D8%B1%D8%A9-%D8%A7%D9%84%D9%82%D8%AF%D9%85/%D9%85%D8%A8%D8%A7%D8%B1%D9%8A%D8%A7%D8%AA-%D8%A7%D9%84%D9%8اليوم"
 
 def extract_match_data(soup):
     json_matches = {}
@@ -56,7 +56,6 @@ def extract_match_data(soup):
         if link_tag and link_tag.get('href'):
             match_link = urljoin("https://www.kooora.com", link_tag['href'])
         
-        # تحديد الدوري
         league_name = "بطولة عامة"
         league_logo = ""
         parent_section = item.find_parent('div', class_='match-list_livescores-match-list__section__n742K')
@@ -68,7 +67,6 @@ def extract_match_data(soup):
                     league_name = league_elem.get_text().strip()
                     league_logo = leagues.get(league_name, "")
         
-        # الحالة والوقت
         status = "لم تبدأ"
         match_status = item.get('data-match-status', '')
         if match_status == 'LIVE': status = "مباشر"
@@ -85,14 +83,12 @@ def extract_match_data(soup):
         minutes_elem = item.find('div', class_='fco-match-minutes__value')
         if minutes_elem: match_time = minutes_elem.get_text().strip()
         
-        # الفرق واللوجو
         jm = json_matches.get(match_link, {})
         home_name = jm.get('home_name') or "غير معروف"
         home_logo = jm.get('home_logo') or ""
         away_name = jm.get('away_name') or "غير معروف"
         away_logo = jm.get('away_logo') or ""
         
-        # القنوات الناقلة
         channels_set = set()
         for ch in item.find_all('div', class_='fco-tv-channel__name'):
             channels_set.add(ch.get_text().strip())
@@ -126,28 +122,27 @@ def push_to_firebase(data, date_str):
     try:
         response = requests.put(url, json=data, timeout=20)
         if response.status_code < 400:
-            print(f"✅ تم تحديث {len(data)} مباراة في Firebase")
+            print(f"✅ Updated {len(data)} matches in Firebase.")
         else:
-            print(f"❌ خطأ Firebase: {response.status_code}")
+            print(f"❌ Firebase Error: {response.status_code}")
     except Exception as e:
-        print(f"❌ فشل الاتصال بـ Firebase: {e}")
+        print(f"❌ Connection Failed: {e}")
 
 def scrape_kooora():
     chrome_options = Options()
-    chrome_options.add_argument("--headless") # ضروري للعمل في السيرفر
+    chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
     
-    # استخدام webdriver-manager لضمان التوافق
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     
     try:
         url = get_today_matches_url()
-        print(f"⏳ جاري فحص المباريات من: {url}")
+        print(f"⏳ Scraping: {url}")
         driver.get(url)
-        time.sleep(10) # انتظار تحميل الجافا سكريبت
+        time.sleep(10) 
         
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         matches = extract_match_data(soup)
@@ -155,7 +150,7 @@ def scrape_kooora():
         if matches:
             push_to_firebase(matches, get_today_date())
         else:
-            print("⚠️ لم يتم العثور على مباريات حالياً.")
+            print("⚠️ No matches found.")
             
     finally:
         driver.quit()
