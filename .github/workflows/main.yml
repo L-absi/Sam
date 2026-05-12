@@ -26,4 +26,5 @@ jobs:
       - name: Run Scraper
         env:
           FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
-        run: python new.py  # استبدل your_script_name باسم ملفك
+          TZ: 'Asia/Riyadh' # تحديد المنطقة الزمنية هنا أيضاً
+        run: python new.py
