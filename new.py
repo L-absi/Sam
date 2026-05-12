@@ -10,11 +10,18 @@ from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
-# جلب رابط Firebase من متغيرات البيئة
-FIREBASE_URL = os.getenv('FIREBASE_URL')
+
+
+import pytz # تأكد من إضافة pytz لملف requirements.txt
 
 def get_today_date():
-    return datetime.now().strftime("%Y-%m-%d")
+    # تحديد المنطقة الزمنية (مثلاً آسيا/الرياض أو أفريقيا/القاهرة)
+    tz = pytz.timezone('Asia/Riyadh') 
+    return datetime.now(tz).strftime("%Y-%m-%d")
+
+
+# جلب رابط Firebase من متغيرات البيئة
+FIREBASE_URL = os.getenv('FIREBASE_URL')
 
 def get_today_matches_url():
     return "https://www.kooora.com/كرة-القدم/مباريات-اليوم"
