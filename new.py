@@ -34,7 +34,6 @@ def get_today_date():
     return datetime.now(tz).strftime("%Y-%m-%d"
 
 
-
 def extract_match_data(soup):
     json_matches = {}
     scripts = soup.find_all('script', type='application/ld+json')
