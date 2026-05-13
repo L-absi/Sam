@@ -45,410 +45,179 @@ def generate_match_id(home, away, league):
 
 def firebase_get(path):
     url = f"{FIREBASE_URL}/{path}.json"
-
     try:
         response = requests.get(url, timeout=10)
-
         if response.status_code == 200:
             return response.json()
-
     except:
         pass
-
     return None
 
 
 def firebase_patch(path, data):
     url = f"{FIREBASE_URL}/{path}.json"
-
     response = requests.patch(url, json=data, timeout=20)
-
-    print(response.status_code)
+    print(f"Firebase Update Status: {response.status_code}")
 
 def league_slug(name):
-
     slug = re.sub(
         r'[^a-zA-Z0-9\u0600-\u06FF]+',
         '-',
         name.lower()
     )
-
     return slug.strip('-')
+
 # =========================
 # SCRAPER
 # =========================
 
 def extract_matches(soup):
-
     json_matches = {}
 
-    scripts = soup.find_all(
-        "script",
-        type="application/ld+json"
-    )
-
+    # Extract JSON-LD data first for better accuracy
+    scripts = soup.find_all("script", type="application/ld+json")
     for script in scripts:
-
         try:
-
             if not script.string:
                 continue
-
             data = json.loads(script.string)
-
-            if (
-                isinstance(data, dict)
-                and data.get("@type") == "SportsEvent"
-            ):
-
+            if isinstance(data, dict) and data.get("@type") == "SportsEvent":
                 url = data.get("url", "")
                 json_matches[url] = {
-
-                    "home_name":
-                        data.get("homeTeam", {})
-                            .get("name", ""),
-                
-                    "away_name":
-                        data.get("awayTeam", {})
-                            .get("name", ""),
-                
-                    "home_logo":
-                        data.get("homeTeam", {})
-                            .get("logo", ""),
-                
-                    "away_logo":
-                        data.get("awayTeam", {})
-                            .get("logo", "")
+                    "home_name": data.get("homeTeam", {}).get("name", ""),
+                    "away_name": data.get("awayTeam", {}).get("name", ""),
+                    "home_logo": data.get("homeTeam", {}).get("logo", ""),
+                    "away_logo": data.get("awayTeam", {}).get("logo", "")
                 }              
         except:
             continue
 
+    # Map league names to logos
     leagues = {}
-
-    headers = soup.find_all(
-        "a",
-        class_="fco-competition-section__header"
-    )
-
+    headers = soup.find_all("a", class_="fco-competition-section__header")
     for header in headers:
-
-        name_elem = header.find(
-            "span",
-            class_="fco-competition-section__header-name"
-        )
-
+        name_elem = header.find("span", class_="fco-competition-section__header-name")
         if not name_elem:
             continue
-
         name = name_elem.get_text().strip()
-
-        img = header.find(
-            "img",
-            class_="fco-image__image"
-        )
-
+        img = header.find("img", class_="fco-image__image")
         logo = img["src"] if img and img.get("src") else ""
-
         leagues[name] = logo
 
     matches = []
-
-    items = soup.find_all(
-        "div",
-        class_="fco-match-list-item"
-    )
+    items = soup.find_all("div", class_="fco-match-list-item")
 
     for item in items:
-
+        # --- 1. INITIALIZE ALL VARIABLES FOR THIS MATCH ---
+        home_name = "Unknown"
+        home_logo = ""
+        away_name = "Unknown"
+        away_logo = ""
+        time_text = ""
         link = ""
 
-        a = item.find(
-            "a",
-            class_="fco-match-data"
-        )
-
+        # Find match link
+        a = item.find("a", class_="fco-match-data")
         if a and a.get("href"):
+            link = urljoin("https://www.kooora.com", a["href"])
 
-            link = urljoin(
-                "https://www.kooora.com",
-                a["href"]
-            )
-
+        # League Data
         league_name = "Unknown"
         league_logo = ""
-
-        section = item.find_parent(
-            "div",
-            class_="match-list_livescores-match-list__section__n742K"
-        )
-
+        section = item.find_parent("div", class_="match-list_livescores-match-list__section__n742K")
         if section:
-
-            header = section.find(
-                "a",
-                class_="fco-competition-section__header"
-            )
-
+            header = section.find("a", class_="fco-competition-section__header")
             if header:
-
-                league_elem = header.find(
-                    "span",
-                    class_="fco-competition-section__header-name"
-                )
-
+                league_elem = header.find("span", class_="fco-competition-section__header-name")
                 if league_elem:
-
                     league_name = league_elem.get_text().strip()
+                    league_logo = leagues.get(league_name, "")
 
-                    league_logo = leagues.get(
-                        league_name,
-                        ""
-                    )
-
+        # Status and Score
         status = "لم تبدأ"
-
-        data_status = item.get(
-            "data-match-status",
-            ""
-        )
-
+        data_status = item.get("data-match-status", "")
         if data_status == "LIVE":
             status = "مباشر"
-
         elif data_status == "RESULT":
             status = "انتهت"
 
         score = ""
-
-        score_home = item.find(
-            "span",
-            class_="fco-match-score-home"
-        )
-
-        score_away = item.find(
-            "span",
-            class_="fco-match-score-away"
-        )
-
+        score_home = item.find("span", class_="fco-match-score-home")
+        score_away = item.find("span", class_="fco-match-score-away")
         if score_home and score_away:
-
-            score = (
-                f"{score_home.get_text().strip()} - "
-                f"{score_away.get_text().strip()}"
-            )
+            score = f"{score_home.get_text().strip()} - {score_away.get_text().strip()}"
 
         minute = ""
-
-        minute_elem = item.find(
-            "div",
-            class_="fco-match-minutes__value"
-        )
-
+        minute_elem = item.find("div", class_="fco-match-minutes__value")
         if minute_elem:
             minute = minute_elem.get_text().strip()
 
-        time_text = ""
-
+        # Match Time logic
         time_elem = item.find("time")
-        
         if time_elem:
-        
-            raw_time = (
-                time_elem.get("datetime")
-                or time_elem.get_text(strip=True)
-            )
-        
+            raw_time = time_elem.get("datetime") or time_elem.get_text(strip=True)
             try:
-        
-                # مثال:
-                # 2026-05-13T19:00:00Z
-        
-                utc_time = datetime.fromisoformat(
-                    raw_time.replace("Z", "+00:00")
-                )
-        
-                # تحويل لتوقيت الرياض
+                utc_time = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
                 riyadh = pytz.timezone("Asia/Riyadh")
-        
                 local_time = utc_time.astimezone(riyadh)
-        
                 time_text = local_time.strftime("%H:%M")
-        
             except:
-        
                 time_text = time_elem.get_text(strip=True)
                             
-            # =========================
-            # TEAM DATA
-            # =========================
+        # --- 2. POPULATE TEAM DATA FROM JSON-LD ---
+        if link in json_matches:
+            jm = json_matches[link]
+            if jm.get("home_name"): home_name = jm["home_name"]
+            if jm.get("home_logo"): home_logo = jm["home_logo"]
+            if jm.get("away_name"): away_name = jm["away_name"]
+            if jm.get("away_logo"): away_logo = jm["away_logo"]
             
-            home_name = "Unknown"
-            home_logo = ""
-            
-            away_name = "Unknown"
-            away_logo = ""
-            
-            # =========================
-            # JSON-LD
-            # =========================
-            
-            if link in json_matches:
-            
-                jm = json_matches[link]
-            
-                if jm.get("home_name"):
-            
-                    home_name = jm["home_name"]
-            
-                if jm.get("home_logo"):
-            
-                    home_logo = jm["home_logo"]
-            
-                if jm.get("away_name"):
-            
-                    away_name = jm["away_name"]
-            
-                if jm.get("away_logo"):
-            
-                    away_logo = jm["away_logo"]
-            
-            # =========================
-            # FALLBACK HTML
-            # =========================
-            
-            if (
-                home_name == "Unknown"
-                or away_name == "Unknown"
-            ):
-            
-                teams = item.find_all(
-                    "div",
-                    class_="fco-match-team"
-                )
-            
-                for team in teams:
-            
-                    side = team.get("data-side")
-            
-                    name_elem = team.find(
-                        "div",
-                        class_="fco-team-name"
-                    )
-            
-                    logo_elem = team.find(
-                        "img",
-                        class_="fco-image__image"
-                    )
-            
-                    name = (
-                        name_elem.get_text(strip=True)
-                        if name_elem else ""
-                    )
-            
-                    logo = (
-                        logo_elem.get("src", "")
-                        if logo_elem else ""
-                    )
-            
-                    if side == "team-a":
-            
-                        if home_name == "Unknown":
-                            home_name = name
-            
-                        if not home_logo:
-                            home_logo = logo
-            
-                    elif side == "team-b":
-            
-                        if away_name == "Unknown":
-                            away_name = name
-            
-                        if not away_logo:
-                            away_logo = logo
+        # --- 3. FALLBACK TO HTML SCRAPING IF DATA STILL MISSING ---
+        if home_name == "Unknown" or away_name == "Unknown":
+            teams = item.find_all("div", class_="fco-match-team")
+            for team in teams:
+                side = team.get("data-side")
+                name_elem = team.find("div", class_="fco-team-name")
+                logo_elem = team.find("img", class_="fco-image__image")
+                
+                name = name_elem.get_text(strip=True) if name_elem else ""
+                logo = logo_elem.get("src", "") if logo_elem else ""
+        
+                if side == "team-a":
+                    if home_name == "Unknown": home_name = name
+                    if not home_logo: home_logo = logo
+                elif side == "team-b":
+                    if away_name == "Unknown": away_name = name
+                    if not away_logo: away_logo = logo
 
-        
+        # Channels logic
         channels = set()
-        
-        for ch in item.select(
-            ".fco-tv-channel__name"
-        ):
-        
-            name = ch.get_text(strip=True)
-        
-            if name:
-                channels.add(name)
-        
-        for ch in item.select(
-            ".fco-tv-channel"
-        ):
-        
-            name_div = ch.select_one(
-                ".fco-tv-channel__name"
-            )
-        
+        for ch in item.select(".fco-tv-channel__name, .fco-tv-channel"):
+            name_div = ch if "fco-tv-channel__name" in ch.get("class", []) else ch.select_one(".fco-tv-channel__name")
             if name_div:
-        
-                name = name_div.get_text(strip=True)
-        
-                if name:
-                    channels.add(name)
-        
+                ch_name = name_div.get_text(strip=True)
+                if ch_name: channels.add(ch_name)
         channels = sorted(list(channels))
 
-
-        match_id = generate_match_id(
-            home_name,
-            away_name,
-            league_name
-        )
+        # Generate ID and Build Dict
+        match_id = generate_match_id(home_name, away_name, league_name)
 
         matches.append({
-
             "id": match_id,
-
             "static": {
-
-                "league":
-                    league_name,
-
-                "league_logo":
-                    league_logo,
-
-                "home_team":
-                    home_name,
-
-                "home_logo":
-                    
-                        home_logo,
-                        
-                    
-
-                "away_team":
-                    away_name,
-
-                "away_logo":
-                    
-                        away_logo,
-                       
-                    
-
-                "channel":
-                    channels,
-
-                "time":
-                    time_text
+                "league": league_name,
+                "league_logo": league_logo,
+                "home_team": home_name,
+                "home_logo": home_logo,
+                "away_team": away_name,
+                "away_logo": away_logo,
+                "channel": channels,
+                "time": time_text
             },
-
             "live": {
-
-                "status":
-                    status,
-
-                "score":
-                    score,
-
-                "minute":
-                    minute
+                "status": status,
+                "score": score,
+                "minute": minute
             }
         })
 
@@ -456,122 +225,65 @@ def extract_matches(soup):
 
 
 # =========================
-# UPDATE ONLY LIVE DATA
+# FIREBASE UPLOADER
 # =========================
 
 def upload_matches(matches):
-
     date = get_date()
-
     leagues_uploaded = {}
 
     for match in matches:
-
         league_name = match["static"]["league"]
-
         league_logo = match["static"]["league_logo"]
-
         slug = league_slug(league_name)
-
         match_id = match["id"]
 
-        # =====================
-        # LEAGUES
-        # =====================
-
+        # League Info
         if slug not in leagues_uploaded:
-
-            firebase_patch(
-
-                f"leagues/{date}/{slug}",
-
-                {
-                    "name": league_name,
-                    "logo": league_logo
-                }
-            )
-
+            firebase_patch(f"leagues/{date}/{slug}", {"name": league_name, "logo": league_logo})
             leagues_uploaded[slug] = True
 
-        # =====================
-        # PATHS
-        # =====================
+        static_path = f"matches/{date}/{slug}/{match_id}/static"
+        live_path = f"matches/{date}/{slug}/{match_id}/live"
 
-        static_path = (
-            f"matches/{date}/{slug}/{match_id}/static"
-        )
-
-        live_path = (
-            f"matches/{date}/{slug}/{match_id}/live"
-        )
-
+        # Update static data if missing
         old_static = firebase_get(static_path)
-
-        # =====================
-        # STATIC
-        # =====================
-
         if not old_static:
+            firebase_patch(static_path, match["static"])
 
-            firebase_patch(
-                static_path,
-                match["static"]
-            )
-
-        # =====================
-        # LIVE
-        # =====================
-
+        # Update live data if changed
         old_live = firebase_get(live_path)
-
         if old_live != match["live"]:
-
-            firebase_patch(
-                live_path,
-                match["live"]
-            )
+            firebase_patch(live_path, match["live"])
 
     print(f"✅ Uploaded {len(matches)} matches")
+
 # =========================
 # MAIN
 # =========================
 
 def scrape():
-
     options = Options()
-
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
 
     driver = webdriver.Chrome(
-        service=Service(
-            ChromeDriverManager().install()
-        ),
+        service=Service(ChromeDriverManager().install()),
         options=options
     )
 
     try:
-
         url = get_matches_url()
-
         print("Scraping:", url)
-
         driver.get(url)
-
         time.sleep(10)
 
-        soup = BeautifulSoup(
-            driver.page_source,
-            "html.parser"
-        )
-
+        soup = BeautifulSoup(driver.page_source, "html.parser")
         matches = extract_matches(soup)
-
         upload_matches(matches)
 
     finally:
-
         driver.quit()
 
 
