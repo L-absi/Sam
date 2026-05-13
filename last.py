@@ -397,8 +397,8 @@ def extract_matches(soup):
 
 
         match_id = generate_match_id(
-            home,
-            away,
+            home_name,
+            away_name,
             league_name
         )
 
