@@ -14,6 +14,9 @@ from urllib.parse import urljoin
 
 import pytz # تأكد من إضافة pytz لملف requirements.txt
 
+# جلب رابط Firebase من متغيرات البيئة
+FIREBASE_URL = os.getenv('FIREBASE_URL')
+
 def get_today_matches_url():
     # تحديد توقيتك المحلي (مثلاً الرياض) لضمان الحصول على التاريخ الصحيح
     tz = pytz.timezone('Asia/Riyadh')
@@ -30,8 +33,6 @@ def get_today_date():
     tz = pytz.timezone('Asia/Riyadh')
     return datetime.now(tz).strftime("%Y-%m-%d"
 
-# جلب رابط Firebase من متغيرات البيئة
-FIREBASE_URL = os.getenv('FIREBASE_URL')
 
 
 def extract_match_data(soup):
