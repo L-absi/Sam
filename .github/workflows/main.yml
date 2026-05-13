@@ -27,4 +27,4 @@ jobs:
         env:
           FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
           TZ: 'Asia/Riyadh' # تحديد المنطقة الزمنية هنا أيضاً
-        run: python new.py
+        run: python last.py
