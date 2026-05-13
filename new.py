@@ -31,7 +31,7 @@ def get_today_matches_url():
 
 def get_today_date():
     tz = pytz.timezone('Asia/Riyadh')
-    return datetime.now(tz).strftime("%Y-%m-%d"
+    return datetime.now(tz).strftime("%Y-%m-%d")
 
 
 def extract_match_data(soup):
