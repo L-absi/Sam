@@ -14,17 +14,25 @@ from urllib.parse import urljoin
 
 import pytz # تأكد من إضافة pytz لملف requirements.txt
 
-def get_today_date():
-    # تحديد المنطقة الزمنية (مثلاً آسيا/الرياض أو أفريقيا/القاهرة)
-    tz = pytz.timezone('Asia/Riyadh') 
-    return datetime.now(tz).strftime("%Y-%m-%d")
+def get_today_matches_url():
+    # تحديد توقيتك المحلي (مثلاً الرياض) لضمان الحصول على التاريخ الصحيح
+    tz = pytz.timezone('Asia/Riyadh')
+    now = datetime.now(tz)
+    
+    day = now.strftime("%d")
+    month = now.strftime("%m")
+    year = now.strftime("%Y")
+    
+    # بناء الرابط بتاريخ محدد لضمان عدم تداخل المناطق الزمنية
+    return f"https://www.kooora.com/?c=0&region=-1&dd={day}&mm={month}&yy={year}"
 
+def get_today_date():
+    tz = pytz.timezone('Asia/Riyadh')
+    return datetime.now(tz).strftime("%Y-%m-%d"
 
 # جلب رابط Firebase من متغيرات البيئة
 FIREBASE_URL = os.getenv('FIREBASE_URL')
 
-def get_today_matches_url():
-    return "https://www.kooora.com/كرة-القدم/مباريات-اليوم"
 
 def extract_match_data(soup):
     json_matches = {}
