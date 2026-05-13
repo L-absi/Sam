@@ -277,61 +277,94 @@ def extract_matches(soup):
             except:
         
                 time_text = time_elem.get_text(strip=True)
-                
-        # =========================
-        # TEAM NAMES
-        # =========================
-        
-        home = ""
-        away = ""
-        
-        # الطريقة الأساسية
-        teams = item.select(
-            ".fco-team-name__name"
-        )
-        
-        if len(teams) >= 2:
-        
-            home = teams[0].get_text(strip=True)
-        
-            away = teams[1].get_text(strip=True)
-        
-        # fallback إضافي
-        if not home or not away:
-        
-            alt_teams = item.select(
-                ".fco-team-name"
-            )
-        
-            if len(alt_teams) >= 2:
-        
-                home = alt_teams[0].get_text(strip=True)
-        
-                away = alt_teams[1].get_text(strip=True)
-        
-        # fallback من JSON-LD
-        json_data = json_matches.get(link, {})
-        
-        if not home:
-        
-            home = json_data.get(
-                "home_name",
-                "Unknown"
-            )
-        
-        if not away:
-        
-            away = json_data.get(
-                "away_name",
-                "Unknown"
-            )
-        
-        # تنظيف
-        home = home.strip() if home else "Unknown"
-        
-        away = away.strip() if away else "Unknown"
-       
-        logos = json_matches.get(link, {})
+                            
+            # =========================
+            # TEAM DATA
+            # =========================
+            
+            home_name = "Unknown"
+            home_logo = ""
+            
+            away_name = "Unknown"
+            away_logo = ""
+            
+            # =========================
+            # JSON-LD
+            # =========================
+            
+            if link in json_matches:
+            
+                jm = json_matches[link]
+            
+                if jm.get("home_name"):
+            
+                    home_name = jm["home_name"]
+            
+                if jm.get("home_logo"):
+            
+                    home_logo = jm["home_logo"]
+            
+                if jm.get("away_name"):
+            
+                    away_name = jm["away_name"]
+            
+                if jm.get("away_logo"):
+            
+                    away_logo = jm["away_logo"]
+            
+            # =========================
+            # FALLBACK HTML
+            # =========================
+            
+            if (
+                home_name == "Unknown"
+                or away_name == "Unknown"
+            ):
+            
+                teams = item.find_all(
+                    "div",
+                    class_="fco-match-team"
+                )
+            
+                for team in teams:
+            
+                    side = team.get("data-side")
+            
+                    name_elem = team.find(
+                        "div",
+                        class_="fco-team-name"
+                    )
+            
+                    logo_elem = team.find(
+                        "img",
+                        class_="fco-image__image"
+                    )
+            
+                    name = (
+                        name_elem.get_text(strip=True)
+                        if name_elem else ""
+                    )
+            
+                    logo = (
+                        logo_elem.get("src", "")
+                        if logo_elem else ""
+                    )
+            
+                    if side == "team-a":
+            
+                        if home_name == "Unknown":
+                            home_name = name
+            
+                        if not home_logo:
+                            home_logo = logo
+            
+                    elif side == "team-b":
+            
+                        if away_name == "Unknown":
+                            away_name = name
+            
+                        if not away_logo:
+                            away_logo = logo
 
         
         channels = set()
@@ -382,22 +415,22 @@ def extract_matches(soup):
                     league_logo,
 
                 "home_team":
-                    home,
+                    home_name,
 
                 "home_logo":
-                    logos.get(
-                        "home_logo",
-                        ""
-                    ),
+                    
+                        home_logo,
+                        
+                    ,
 
                 "away_team":
-                    away,
+                    away_name,
 
                 "away_logo":
-                    logos.get(
-                        "away_logo",
-                        ""
-                    ),
+                    
+                        away_logo,
+                       
+                    ,
 
                 "channel":
                     channels,
