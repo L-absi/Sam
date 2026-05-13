@@ -102,18 +102,24 @@ def extract_matches(soup):
             ):
 
                 url = data.get("url", "")
-
                 json_matches[url] = {
 
+                    "home_name":
+                        data.get("homeTeam", {})
+                            .get("name", ""),
+                
+                    "away_name":
+                        data.get("awayTeam", {})
+                            .get("name", ""),
+                
                     "home_logo":
                         data.get("homeTeam", {})
                             .get("logo", ""),
-
+                
                     "away_logo":
                         data.get("awayTeam", {})
                             .get("logo", "")
-                }
-
+                }              
         except:
             continue
 
@@ -272,22 +278,59 @@ def extract_matches(soup):
         
                 time_text = time_elem.get_text(strip=True)
                 
+        # =========================
+        # TEAM NAMES
+        # =========================
         
-        home = "Unknown"
-        away = "Unknown"
+        home = ""
+        away = ""
         
-        teams = item.find_all(
-            "span",
-            class_="fco-team-name__name"
+        # الطريقة الأساسية
+        teams = item.select(
+            ".fco-team-name__name"
         )
         
         if len(teams) >= 2:
         
             home = teams[0].get_text(strip=True)
-            away = teams[1].get_text(strip=True)
-
         
-
+            away = teams[1].get_text(strip=True)
+        
+        # fallback إضافي
+        if not home or not away:
+        
+            alt_teams = item.select(
+                ".fco-team-name"
+            )
+        
+            if len(alt_teams) >= 2:
+        
+                home = alt_teams[0].get_text(strip=True)
+        
+                away = alt_teams[1].get_text(strip=True)
+        
+        # fallback من JSON-LD
+        json_data = json_matches.get(link, {})
+        
+        if not home:
+        
+            home = json_data.get(
+                "home_name",
+                "Unknown"
+            )
+        
+        if not away:
+        
+            away = json_data.get(
+                "away_name",
+                "Unknown"
+            )
+        
+        # تنظيف
+        home = home.strip() if home else "Unknown"
+        
+        away = away.strip() if away else "Unknown"
+       
         logos = json_matches.get(link, {})
 
         
