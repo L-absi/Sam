@@ -421,7 +421,7 @@ def extract_matches(soup):
                     
                         home_logo,
                         
-                    ,
+                    
 
                 "away_team":
                     away_name,
@@ -430,7 +430,7 @@ def extract_matches(soup):
                     
                         away_logo,
                        
-                    ,
+                    
 
                 "channel":
                     channels,
