@@ -12,7 +12,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-
+import re
 import pytz
 
 FIREBASE_URL = os.getenv("FIREBASE_URL")
@@ -65,7 +65,15 @@ def firebase_patch(path, data):
 
     print(response.status_code)
 
+def league_slug(name):
 
+    slug = re.sub(
+        r'[^a-zA-Z0-9\u0600-\u06FF]+',
+        '-',
+        name.lower()
+    )
+
+    return slug.strip('-')
 # =========================
 # SCRAPER
 # =========================
@@ -235,45 +243,82 @@ def extract_matches(soup):
 
         time_text = ""
 
-        time_elem = item.find(
-            "time",
-            class_="fco-match-start-time"
-        )
-
+        time_elem = item.find("time")
+        
         if time_elem:
-            time_text = time_elem.get_text().strip()
-
+        
+            raw_time = (
+                time_elem.get("datetime")
+                or time_elem.get_text(strip=True)
+            )
+        
+            try:
+        
+                # مثال:
+                # 2026-05-13T19:00:00Z
+        
+                utc_time = datetime.fromisoformat(
+                    raw_time.replace("Z", "+00:00")
+                )
+        
+                # تحويل لتوقيت الرياض
+                riyadh = pytz.timezone("Asia/Riyadh")
+        
+                local_time = utc_time.astimezone(riyadh)
+        
+                time_text = local_time.strftime("%H:%M")
+        
+            except:
+        
+                time_text = time_elem.get_text(strip=True)
+                
+        
         home = "Unknown"
         away = "Unknown"
-
-        home_elem = item.find(
-            "span",
-            class_="fco-team-name"
-        )
-
+        
         teams = item.find_all(
             "span",
-            class_="fco-team-name"
+            class_="fco-team-name__name"
         )
-
+        
         if len(teams) >= 2:
+        
+            home = teams[0].get_text(strip=True)
+            away = teams[1].get_text(strip=True)
 
-            home = teams[0].get_text().strip()
-            away = teams[1].get_text().strip()
+        
 
         logos = json_matches.get(link, {})
 
-        channels = []
-
-        for ch in item.find_all(
-            "div",
-            class_="fco-tv-channel__name"
+        
+        channels = set()
+        
+        for ch in item.select(
+            ".fco-tv-channel__name"
         ):
+        
+            name = ch.get_text(strip=True)
+        
+            if name:
+                channels.add(name)
+        
+        for ch in item.select(
+            ".fco-tv-channel"
+        ):
+        
+            name_div = ch.select_one(
+                ".fco-tv-channel__name"
+            )
+        
+            if name_div:
+        
+                name = name_div.get_text(strip=True)
+        
+                if name:
+                    channels.add(name)
+        
+        channels = sorted(list(channels))
 
-            name = ch.get_text().strip()
-
-            if name not in channels:
-                channels.append(name)
 
         match_id = generate_match_id(
             home,
@@ -342,21 +387,54 @@ def upload_matches(matches):
 
     date = get_date()
 
+    leagues_uploaded = {}
+
     for match in matches:
+
+        league_name = match["static"]["league"]
+
+        league_logo = match["static"]["league_logo"]
+
+        slug = league_slug(league_name)
 
         match_id = match["id"]
 
+        # =====================
+        # LEAGUES
+        # =====================
+
+        if slug not in leagues_uploaded:
+
+            firebase_patch(
+
+                f"leagues/{date}/{slug}",
+
+                {
+                    "name": league_name,
+                    "logo": league_logo
+                }
+            )
+
+            leagues_uploaded[slug] = True
+
+        # =====================
+        # PATHS
+        # =====================
+
         static_path = (
-            f"matches/{date}/{match_id}/static"
+            f"matches/{date}/{slug}/{match_id}/static"
         )
 
         live_path = (
-            f"matches/{date}/{match_id}/live"
+            f"matches/{date}/{slug}/{match_id}/live"
         )
 
         old_static = firebase_get(static_path)
 
-        # رفع البيانات الثابتة مرة واحدة فقط
+        # =====================
+        # STATIC
+        # =====================
+
         if not old_static:
 
             firebase_patch(
@@ -364,15 +442,20 @@ def upload_matches(matches):
                 match["static"]
             )
 
-        # تحديث live دائماً
-        firebase_patch(
-            live_path,
-            match["live"]
-        )
+        # =====================
+        # LIVE
+        # =====================
+
+        old_live = firebase_get(live_path)
+
+        if old_live != match["live"]:
+
+            firebase_patch(
+                live_path,
+                match["live"]
+            )
 
     print(f"✅ Uploaded {len(matches)} matches")
-
-
 # =========================
 # MAIN
 # =========================
