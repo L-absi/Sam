@@ -18,18 +18,19 @@ import pytz # تأكد من إضافة pytz لملف requirements.txt
 FIREBASE_URL = os.getenv('FIREBASE_URL')
 
 def get_today_matches_url():
-    # تحديد توقيتك المحلي (مثلاً الرياض) لضمان الحصول على التاريخ الصحيح
+    # تحديد توقيتك المحلي (الرياض/القاهرة) لضمان الحصول على التاريخ الصحيح
     tz = pytz.timezone('Asia/Riyadh')
     now = datetime.now(tz)
     
-    day = now.strftime("%d")
-    month = now.strftime("%m")
-    year = now.strftime("%Y")
+    # تنسيق التاريخ المطلوب: 2026-05-13
+    date_str = now.strftime("%Y-%m-%d")
     
-    # بناء الرابط بتاريخ محدد لضمان عدم تداخل المناطق الزمنية
-    return f"https://www.kooora.com/?c=0&region=-1&dd={day}&mm={month}&yy={year}"
+    # بناء الرابط بالتنسيق الجديد
+    # ملاحظة: تم إضافة '/' بعد مواعيد-المباريات لربط التاريخ بشكل صحيح
+    return f"https://www.kooora.com/كرة-القدم/مواعيد-المباريات/{date_str}"
 
 def get_today_date():
+    # هذه الدالة للتأكد أن اسم المسار في Firebase يطابق التاريخ المستخدم في الرابط
     tz = pytz.timezone('Asia/Riyadh')
     return datetime.now(tz).strftime("%Y-%m-%d")
 
