@@ -136,7 +136,7 @@ def extract_match_data(soup):
 def push_to_firebase(data, date_str):
     url = f"{FIREBASE_URL}/{date_str}.json"
     try:
-        response = requests.put(url, json=data, timeout=20)
+        response = requests.patch(url, json=data, timeout=20)
         if response.status_code < 400:
             print(f"✅ Updated {len(data)} matches in Firebase.")
         else:
