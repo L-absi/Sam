@@ -22,7 +22,7 @@ FIREBASE_URL = os.getenv("FIREBASE_URL")
 # =========================
 
 def get_date():
-    tz = pytz.timezone("Asia/Riyadh")
+    tz = pytz.timezone("Asia/Aden")
     return datetime.now(tz).strftime("%Y-%m-%d")
 
 
@@ -158,8 +158,8 @@ def extract_matches(soup):
             raw_time = time_elem.get("datetime") or time_elem.get_text(strip=True)
             try:
                 utc_time = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
-                riyadh = pytz.timezone("Asia/Riyadh")
-                local_time = utc_time.astimezone(riyadh)
+                riyadh = pytz.timezone("Asia/Aden")
+                local_time = utc_time.astimezone(aden)
                 time_text = local_time.strftime("%H:%M")
             except:
                 time_text = time_elem.get_text(strip=True)
@@ -277,9 +277,27 @@ def scrape():
         url = get_matches_url()
         print("Scraping:", url)
         driver.get(url)
-        time.sleep(10)
+        #time.sleep(10)
+        
+        print("Navigated to page, starting scroll...")
 
+        # التمرير لأسفل الصفحة ببطء لتحميل كافة الدوريات
+        last_height = driver.execute_script("return document.body.scrollHeight")
+        for i in range(3):  # التمرير 3 مرات غالباً يكفي لموقع كووورة
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(3)  # انتظار قصير لتحميل البيانات الجديدة
+            new_height = driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
+                break
+            last_height = new_height
+        
+        print("Scroll finished, extracting data...")
+        
+        # الآن اسحب السورس بعد تحميل كل شيء
         soup = BeautifulSoup(driver.page_source, "html.parser")
+
+
+        #soup = BeautifulSoup(driver.page_source, "html.parser")
         matches = extract_matches(soup)
         upload_matches(matches)
 
