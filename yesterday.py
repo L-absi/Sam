@@ -6,7 +6,7 @@ import hashlib
 import requests
 import time
 import pytz
-from datetime import datetime
+from datetime import datetime, timedelta
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -39,9 +39,11 @@ CHANNEL_MAP = {
 # HELPERS & UTILS
 # =========================
 
-def get_date():
+def get_yesterday_date():
+    """يرجع تاريخ اليوم السابق بتنسيق YYYY-MM-DD"""
     tz = pytz.timezone("Asia/Aden")
-    return datetime.now(tz).strftime("%Y-%m-%d")
+    yesterday = datetime.now(tz) - timedelta(days=1)
+    return yesterday.strftime("%Y-%m-%d")
 
 def generate_match_id(home, away, league):
     raw = f"{home}_{away}_{league}"
@@ -118,48 +120,57 @@ def main():
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     
     try:
-        # 1. جلب بيانات المعلقين أولاً
+        # 1. جلب المعلقين (غالباً تكون لمباريات اليوم الحالي ولكن سنحتفظ بها للمطابقة)
         print("📡 Fetching commentators info...")
         comm_list = extract_commentators(driver)
         
-        # 2. جلب مباريات اليوم مباشرة (تم إلغاء الضغط على زر اليوم السابق)
-        print(f"📡 Fetching today's matches from: {MATCHES_URL}")
+        # 2. جلب مباريات اليوم السابق
+        print(f"📡 Navigating to: {MATCHES_URL}")
         driver.get(MATCHES_URL)
-        WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".anwp-fl-game")))
         
-        # تمرير بسيط لضمان تحميل العناصر
-        driver.execute_script("window.scrollTo(0, 500);")
-        time.sleep(2)
+        # الانتظار والضغط على زر "اليوم السابق" في جدول المباريات
+        wait = WebDriverWait(driver, 20)
+        prev_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".anwp-fl-calendar-slider__swiper-button-prev")))
+        
+        print("🖱️ Clicking on Previous Day button...")
+        prev_btn.click()
+        
+        # انتظار تحميل مباريات اليوم السابق (نتأكد من ظهور حاوية المباريات مجدداً)
+        time.sleep(4) 
         
         soup = BeautifulSoup(driver.page_source, 'html.parser')
-        date_str = get_date()
+        yesterday_str = get_yesterday_date()
+        print(f"📅 Processing matches for Yesterday: {yesterday_str}")
         
         league_blocks = soup.find_all('div', class_='anwp-fl-block-header')
         
+        if not league_blocks:
+            print("⚠️ No leagues found for yesterday.")
+            return
+
         for header in league_blocks:
-            # بيانات الدوري
             league_name = header.find('a').get_text(strip=True) if header.find('a') else 'Unknown'
             league_logo = header.find('img')['src'] if header.find('img') else ''
             slug = league_slug(league_name)
             
-            # تحديث معلومات الدوري في فايربيس
-            firebase_patch(f"leagues/{date_str}/{slug}", {"name": league_name, "logo": league_logo})
+            # تحديث معلومات الدوري في فايربيس تحت تاريخ الأمس
+            firebase_patch(f"leagues/{yesterday_str}/{slug}", {"name": league_name, "logo": league_logo})
 
             next_elem = header.find_next_sibling()
             while next_elem and 'anwp-fl-block-header' not in next_elem.get('class', []):
                 if 'anwp-fl-game' in next_elem.get('class', []):
-                    # استخراج بيانات المباراة
+                    # استخراج البيانات الأساسية
                     home = next_elem.find('div', class_='match-slim__team-home-title').get_text(strip=True)
                     away = next_elem.find('div', class_='match-slim__team-away-title').get_text(strip=True)
                     h_logo = next_elem.find('img', class_='match-slim__team-home-logo')['src'] if next_elem.find('img', class_='match-slim__team-home-logo') else ''
                     a_logo = next_elem.find('img', class_='match-slim__team-away-logo')['src'] if next_elem.find('img', class_='match-slim__team-away-logo') else ''
                     m_time = next_elem.find('span', class_='match-slim__time').get_text(strip=True) if next_elem.find('span', class_='match-slim__time') else ''
                     
-                    # النتيجة (Live)
+                    # بما أنها مباريات الأمس، فغالباً النتائج موجودة والحالة "انتهت"
                     h_score = next_elem.find('span', class_='match-slim__scores-home').get_text(strip=True) if next_elem.find('span', class_='match-slim__scores-home') else '-'
                     a_score = next_elem.find('span', class_='match-slim__scores-away').get_text(strip=True) if next_elem.find('span', class_='match-slim__scores-away') else '-'
                     
-                    # مطابقة المعلق والقناة
+                    # محاولة مطابقة المعلق (إذا كان موجوداً في قائمة اليوم)
                     match_comm = "غير مدرج"
                     match_chan = "غير مدرج"
                     norm_home = normalize_text(home)
@@ -169,10 +180,9 @@ def main():
                             match_chan = CHANNEL_MAP.get(c['channel'], c['channel'])
                             break
 
-                    # إنشاء ID المباراة
                     match_id = generate_match_id(home, away, league_name)
                     
-                    # تجهيز هيكلية البيانات
+                    # هيكلية البيانات
                     static_data = {
                         "league": league_name,
                         "league_logo": league_logo,
@@ -186,26 +196,24 @@ def main():
                     }
                     
                     live_data = {
-                        "status": "مباشر" if h_score != "-" else "لم تبدأ",
+                        "status": "انتهت",
                         "score": f"{h_score} - {a_score}",
-                        "minute": "" 
+                        "minute": "FT" 
                     }
 
-                    # --- الحفظ في فايربيس ---
-                    match_path = f"matches/{date_str}/{slug}/{match_id}"
+                    # الحفظ في فايربيس تحت تاريخ الأمس
+                    match_path = f"matches/{yesterday_str}/{slug}/{match_id}"
                     
-                    # حفظ البيانات الثابتة إذا لم تكن موجودة
+                    # حفظ البيانات الثابتة
                     if not firebase_get(f"{match_path}/static"):
                         firebase_patch(f"{match_path}/static", static_data)
                     
-                    # تحديث البيانات المباشرة عند التغيير فقط
-                    old_live = firebase_get(f"{match_path}/live")
-                    if old_live != live_data:
-                        firebase_patch(f"{match_path}/live", live_data)
+                    # تحديث النتيجة النهائية
+                    firebase_patch(f"{match_path}/live", live_data)
 
                 next_elem = next_elem.find_next_sibling()
         
-        print(f"✅ Finished syncing matches for {date_str}")
+        print(f"✅ Successfully archived yesterday's matches ({yesterday_str})")
 
     except Exception as e:
         print(f"❌ Error: {e}")
