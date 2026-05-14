@@ -3,7 +3,7 @@ name: Update Matches Every 5 Minutes
 on:
   schedule:
     # هذا الكود يعني التشغيل كل 5 دقائق
-    - cron: '*/15 * * * *'
+    - cron: '*/59 * * * *'
   workflow_dispatch: # يتيح لك تشغيل السكربت يدوياً للتجربة
 
 jobs:
@@ -26,5 +26,5 @@ jobs:
       - name: Run Scraper
         env:
           FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
-          TZ: 'Asia/Riyadh' # تحديد المنطقة الزمنية هنا أيضاً
+          TZ: 'Asia/Aden' # تحديد المنطقة الزمنية هنا أيضاً
         run: python last.py
