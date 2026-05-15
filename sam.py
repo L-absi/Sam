@@ -173,13 +173,15 @@ def scrape_and_upload():
                         "home_logo": h_logo,
                         "away_team": away,
                         "away_logo": a_logo,
-                        "channel": [match_chan],
-                        "commentator": match_comm,
+                       # "channel": [match_chan],
+                        
                         "time": m_time
                     }
                     
                     live_data = {
                         "status": "مباشر" if h_score != "-" else "لم تبدأ",
+                        "channel":  [match_chan],      
+                        "commentator": match_comm,
                         "score": f"{h_score} - {a_score}",
                         "minute": "" # المواقع الحالية قد لا توفر الدقيقة بسهولة في هذا التصميم
                     }
