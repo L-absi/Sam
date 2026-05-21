@@ -8,6 +8,9 @@ import re
 import re
 from difflib import SequenceMatcher
 
+BASE_URL = os.getenv("BASE_URL")
+
+
 def normalize_team_name(name):
     """تطبيع اسم الفريق: إزالة '| تحت 17' و 'تحت 17' وأي شيء مشابه"""
     if not name:
