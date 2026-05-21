@@ -8,6 +8,7 @@ import hashlib
 import re
 import re
 from difflib import SequenceMatcher
+import pytz
 
 BASE_URL = os.getenv("FIREBASE_URL2")
 
@@ -213,8 +214,10 @@ def fix_image_url(url):
 
 # ================== دوال التاريخ والرفع ==================
 def get_today_date():
-    return datetime.now().strftime("%Y-%m-%d")
+    tz = pytz.timezone("Asia/Aden")
+    return datetime.now(tz).strftime("%Y-%m-%d")
 
+    
 def push_to_firebase_structured(database_structure):
     today_date = get_today_date()
     leagues_data = database_structure.get("leagues", {}).get(today_date, {})
