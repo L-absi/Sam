@@ -8,7 +8,7 @@ import re
 import re
 from difflib import SequenceMatcher
 
-BASE_URL = os.getenv("BASE_URL")
+BASE_URL = os.getenv("FIREBASE_URL2")
 
 
 def normalize_team_name(name):
