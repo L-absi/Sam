@@ -2,6 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 import json
 import re
+import os
 from datetime import datetime
 import hashlib
 import re
