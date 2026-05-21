@@ -28,6 +28,6 @@ jobs:
 
       - name: Run Scraper
         env:
-          FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
+          BASE_URL: ${{ secrets.BASE_URL }}
           TZ: 'Asia/Aden' # تحديد المنطقة الزمنية هنا أيضاً
-        run: python yesterday.py
+        run: python fil.py
