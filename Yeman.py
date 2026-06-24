@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import json
-import re as regex
+import re
 import os
 import hashlib
 import requests
@@ -61,17 +61,17 @@ def generate_match_id(home, away, league):
     return hashlib.md5(raw.encode()).hexdigest()
 
 def league_slug(name):
-    slug = regex.sub(r'[^a-zA-Z0-9\u0600-\u06FF]+', '-', name.lower())
+    slug = re.sub(r'[^a-zA-Z0-9\u0600-\u06FF]+', '-', name.lower())
     return slug.strip('-')
 
 def normalize_text(text):
     if not text: return ""
     text = text.strip()
-    text = regex.sub(r'[\u064B-\u065F]', '', text)
-    text = regex.sub(r'[أإآ]', 'ا', text)
-    text = regex.sub(r'[ة]', 'ه', text)
-    text = regex.sub(r'[ى]', 'ي', text)
-    text = regex.sub(r'\s+', ' ', text)
+    text = re.sub(r'[\u064B-\u065F]', '', text)
+    text = re.sub(r'[أإآ]', 'ا', text)
+    text = re.sub(r'[ة]', 'ه', text)
+    text = re.sub(r'[ى]', 'ي', text)
+    text = re.sub(r'\s+', ' ', text)
     return text.lower()
 
 # =========================
@@ -195,45 +195,46 @@ def scrape_date(driver, date_str, commentators_list):
                 a_logo = next_elem.find('img', class_='match-slim__team-away-logo')['src'] if next_elem.find('img', class_='match-slim__team-away-logo') else ''
                 m_time = next_elem.find('span', class_='match-slim__time').get_text(strip=True) if next_elem.find('span', class_='match-slim__time') else ''
 
-                full_text = next_elem.get_text(separator=' | ')
-                print(f"   [DEBUG] {home} vs {away}: {full_text[:250]}")
+                # النتيجة (تعمل حاليًا)
+                h_score = next_elem.find('span', class_='match-slim__scores-home').get_text(strip=True) if next_elem.find('span', class_='match-slim__scores-home') else '-'
+                a_score = next_elem.find('span', class_='match-slim__scores-away').get_text(strip=True) if next_elem.find('span', class_='match-slim__scores-away') else '-'
 
-                # ---- استخراج النتيجة الجديد (من النص العاري) ----
-                h_score = '-'
-                a_score = '-'
-
-                # نبحث عن رقمين متتاليين بعد اسم الفريق (مثال: "بنما 0 1")
-                match = regex.search(rf'{regex.escape(home)}\s+(\d+)\s+(\d+)', full_text)
-                if not match:
-                    match = regex.search(rf'{regex.escape(away)}\s+(\d+)\s+(\d+)', full_text)
-                if not match:
-                    # محاولة عامة: رقمين متتاليين محاطين بمسافات، بشرط ألا يكونا التاريخ
-                    match = regex.search(r'(?<!\d)(\d+)\s+(\d+)(?!\d)', full_text)
-
-                if match:
-                    h_score = match.group(1)
-                    a_score = match.group(2)
-
-                # ---- تحديد الحالة ----
+                # ---- تحديد الحالة والدقيقة ----
                 if h_score != '-' and a_score != '-':
                     if date_str == now_aden_str:
                         status = "مباشر"
+                        # محاولة استخراج الدقيقة
+                        minute = ""
+                        # المحاولة 1: وسم معين
+                        minute_elem = (
+                            next_elem.find('span', class_='match-slim__minute') or
+                            next_elem.find('span', class_='match-slim__status') or
+                            next_elem.find('div', class_='match-slim__minute') or
+                            next_elem.find('div', class_='match-slim__status')
+                        )
+                        if minute_elem:
+                            text = minute_elem.get_text(strip=True)
+                            if text and ("'" in text or text in ["HT", "FT"]):
+                                minute = text
+
+                        # المحاولة 2: regex على النص الكامل
+                        if not minute:
+                            full_match_text = next_elem.get_text()
+                            match = re.search(r'(\d{1,3}\+?\d*)\s*\'', full_match_text)
+                            if match:
+                                minute = match.group(1) + "'"
+                            elif 'HT' in full_match_text:
+                                minute = 'HT'
+                            elif 'FT' in full_match_text:
+                                minute = 'FT'
                     else:
                         status = "انتهت"
+                        minute = "FT"
                 else:
                     status = "لم تبدأ"
+                    minute = ""
 
-                # ---- الدقيقة (لا تظهر في الصفحات الحالية) ----
-                minute = ""
-                if status == "مباشر":
-                    # لن تظهر في الغالب
-                    minute_elem = next_elem.find('span', class_='match-slim__minute')
-                    if minute_elem:
-                        minute = minute_elem.get_text(strip=True)
-                elif status == "انتهت":
-                    minute = "FT"
-
-                # ---- المعلق والقناة ----
+                # محاولة مطابقة المعلق والقناة
                 match_comm = "غير مدرج"
                 match_chan = "غير مدرج"
                 norm_home = normalize_text(home)
