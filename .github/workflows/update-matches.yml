@@ -1,0 +1,52 @@
+name: Update Matches
+
+on:
+  # يبقى كـ احتياط فقط (سيعمل كل 5 دقائق فعلياً بحد أقصى، بسبب قيد GitHub)
+  schedule:
+    - cron: '*/5 * * * *'
+  # هذا هو المحرّك الحقيقي للتشغيل كل 3 دقائق، يُستدعى من خدمة خارجية مجانية
+  workflow_dispatch:
+  repository_dispatch:
+    types: [scrape-matches]
+
+# يمنع تراكم تشغيلات متوازية إذا تأخر تشغيل سابق
+concurrency:
+  group: scrape-matches
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4 # أمان: لا يسمح للتشغيل بتجاوز فترة التكرار (3 دقائق) كثيراً
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      # كاش لملفات ChromeDriver لتجنب تحميله من جديد كل تشغيل (يوفّر وقت ودقائق)
+      - name: Cache ChromeDriver
+        uses: actions/cache@v4
+        with:
+          path: ~/.wdm
+          key: wdm-chromedriver-${{ runner.os }}
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Scraper
+        env:
+          FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
+          TZ: 'Asia/Aden'
+        run: python Yeman.py
