@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import json
-import re as regex  # استخدمنا اسم مختلف لتجنب التعارض مع re المدمج
+import re as regex
 import os
 import hashlib
 import requests
@@ -20,7 +20,7 @@ from bs4 import BeautifulSoup
 # Configuration
 # -------------------------------------------------------------------
 FIREBASE_URL = os.getenv("FIREBASE_URL")
-BASE_MATCHES_URL = "https://as-goal.net/wsw/"       # صفحة اليوم الافتراضية
+BASE_MATCHES_URL = "https://as-goal.net/wsw/"
 COMMENTATORS_URL = "https://as-goal.net/todays-match-commentators02/"
 
 CHANNEL_MAP = {
@@ -43,12 +43,6 @@ def get_now_aden():
     return datetime.now(pytz.timezone("Asia/Aden"))
 
 def get_target_dates():
-    """
-    منطق اختيار التواريخ مطابق لـ OldMatchesRepository.kt:
-    - قبل 5 صباحاً   : الأمس + اليوم
-    - 5 صباحاً – 5:59 مساءً : اليوم فقط
-    - 6 مساءً فما فوق : اليوم + الغد
-    """
     now = get_now_aden()
     today_str = now.strftime("%Y-%m-%d")
     hour = now.hour
@@ -105,10 +99,6 @@ def firebase_patch(path, data):
 # =========================
 
 def extract_commentators(driver):
-    """
-    يسحب المعلقين والقنوات من الصفحة الثابتة (لليوم).
-    تُستخدم لمطابقة أي مباراة ما زالت بياناتها غير معروفة.
-    """
     driver.get(COMMENTATORS_URL)
     try:
         WebDriverWait(driver, 15).until(
@@ -137,11 +127,6 @@ def extract_commentators(driver):
         return []
 
 def navigate_to_date(driver, target_date):
-    """
-    من صفحة اليوم (BASE_MATCHES_URL) ينتقل إلى التاريخ المطلوب
-    باستخدام زري prev/next الموجودين في شريط التمرير.
-    """
-    # نضمن أننا على صفحة اليوم أولاً
     driver.get(BASE_MATCHES_URL)
     WebDriverWait(driver, 20).until(
         EC.presence_of_element_located((By.CSS_SELECTOR, ".anwp-fl-game"))
@@ -171,12 +156,11 @@ def navigate_to_date(driver, target_date):
                 EC.element_to_be_clickable((By.CSS_SELECTOR, btn_selector))
             )
             btn.click()
-            time.sleep(2.5)   # انتظار تحميل مباريات اليوم الجديد
+            time.sleep(2.5)
         except Exception as e:
             print(f"   ⚠️ Failed to click {btn_selector}: {e}")
             break
 
-    # تأكيد ظهور المباريات بعد الانتقال
     try:
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".anwp-fl-game"))
@@ -186,10 +170,6 @@ def navigate_to_date(driver, target_date):
         print(f"   ❌ Could not confirm matches loaded for {target_date}")
 
 def scrape_date(driver, date_str, commentators_list):
-    """
-    يحلل صفحة المباريات للتاريخ المحدد (المعروضة حالياً في المتصفح)
-    ويرفع البيانات إلى Firebase مع إعادة محاولة مطابقة المعلقين إن كانوا غير مدرجين سابقاً.
-    """
     soup = BeautifulSoup(driver.page_source, 'html.parser')
     league_blocks = soup.find_all('div', class_='anwp-fl-block-header')
 
@@ -204,49 +184,35 @@ def scrape_date(driver, date_str, commentators_list):
         league_logo = header.find('img')['src'] if header.find('img') else ''
         slug = league_slug(league_name)
 
-        # تحديث الدوري (اختياري)
         firebase_patch(f"leagues/{date_str}/{slug}", {"name": league_name, "logo": league_logo})
 
         next_elem = header.find_next_sibling()
         while next_elem and 'anwp-fl-block-header' not in next_elem.get('class', []):
             if 'anwp-fl-game' in next_elem.get('class', []):
-                # معلومات أساسية
                 home = next_elem.find('div', class_='match-slim__team-home-title').get_text(strip=True)
                 away = next_elem.find('div', class_='match-slim__team-away-title').get_text(strip=True)
                 h_logo = next_elem.find('img', class_='match-slim__team-home-logo')['src'] if next_elem.find('img', class_='match-slim__team-home-logo') else ''
                 a_logo = next_elem.find('img', class_='match-slim__team-away-logo')['src'] if next_elem.find('img', class_='match-slim__team-away-logo') else ''
                 m_time = next_elem.find('span', class_='match-slim__time').get_text(strip=True) if next_elem.find('span', class_='match-slim__time') else ''
 
-                # ---- تشخيص ----
                 full_text = next_elem.get_text(separator=' | ')
-                print(f"   [DEBUG] {home} vs {away}: {full_text[:200]}")
+                print(f"   [DEBUG] {home} vs {away}: {full_text[:250]}")
 
-                # ---- استخراج النتيجة ----
+                # ---- استخراج النتيجة الجديد (من النص العاري) ----
                 h_score = '-'
                 a_score = '-'
 
-                # المحاولة 1: المحددات المعروفة
-                home_span = next_elem.find('span', class_='match-slim__scores-home')
-                away_span = next_elem.find('span', class_='match-slim__scores-away')
-                if home_span and away_span:
-                    h_score = home_span.get_text(strip=True)
-                    a_score = away_span.get_text(strip=True)
+                # نبحث عن رقمين متتاليين بعد اسم الفريق (مثال: "بنما 0 1")
+                match = regex.search(rf'{regex.escape(home)}\s+(\d+)\s+(\d+)', full_text)
+                if not match:
+                    match = regex.search(rf'{regex.escape(away)}\s+(\d+)\s+(\d+)', full_text)
+                if not match:
+                    # محاولة عامة: رقمين متتاليين محاطين بمسافات، بشرط ألا يكونا التاريخ
+                    match = regex.search(r'(?<!\d)(\d+)\s+(\d+)(?!\d)', full_text)
 
-                # المحاولة 2: محددات بديلة (مثلاً div.scores)
-                if h_score == '-' or a_score == '-':
-                    score_wrapper = next_elem.find('div', class_='match-slim__scores')
-                    if score_wrapper:
-                        scores = score_wrapper.find_all('span')
-                        if len(scores) >= 2:
-                            h_score = scores[0].get_text(strip=True)
-                            a_score = scores[1].get_text(strip=True)
-
-                # المحاولة 3: تعبير منتظم على النص الكامل
-                if h_score == '-' or a_score == '-':
-                    match = regex.search(r'(\d+)\s*[-–]\s*(\d+)', full_text)
-                    if match:
-                        h_score = match.group(1)
-                        a_score = match.group(2)
+                if match:
+                    h_score = match.group(1)
+                    a_score = match.group(2)
 
                 # ---- تحديد الحالة ----
                 if h_score != '-' and a_score != '-':
@@ -257,31 +223,13 @@ def scrape_date(driver, date_str, commentators_list):
                 else:
                     status = "لم تبدأ"
 
-                # ---- استخراج الدقيقة ----
+                # ---- الدقيقة (لا تظهر في الصفحات الحالية) ----
                 minute = ""
                 if status == "مباشر":
-                    # المحاولة 1: عناصر معروفة
-                    minute_elem = (
-                        next_elem.find('span', class_='match-slim__minute') or
-                        next_elem.find('span', class_='match-slim__status') or
-                        next_elem.find('div', class_='match-slim__minute') or
-                        next_elem.find('div', class_='match-slim__status')
-                    )
+                    # لن تظهر في الغالب
+                    minute_elem = next_elem.find('span', class_='match-slim__minute')
                     if minute_elem:
-                        text = minute_elem.get_text(strip=True)
-                        if text and ("'" in text or text in ["HT", "FT"]):
-                            minute = text
-
-                    # المحاولة 2: تعبير منتظم
-                    if not minute:
-                        match = regex.search(r'(\d{1,3}\+?\d*)\s*\'', full_text)
-                        if match:
-                            minute = match.group(1) + "'"
-                        elif 'HT' in full_text:
-                            minute = 'HT'
-                        elif 'FT' in full_text:
-                            minute = 'FT'
-
+                        minute = minute_elem.get_text(strip=True)
                 elif status == "انتهت":
                     minute = "FT"
 
@@ -299,7 +247,6 @@ def scrape_date(driver, date_str, commentators_list):
                 match_id = generate_match_id(home, away, league_name)
                 match_path = f"matches/{date_str}/{slug}/{match_id}"
 
-                # ---- البيانات الثابتة ----
                 static_data = {
                     "league": league_name,
                     "league_logo": league_logo,
@@ -312,7 +259,6 @@ def scrape_date(driver, date_str, commentators_list):
                 if not firebase_get(f"{match_path}/static"):
                     firebase_patch(f"{match_path}/static", static_data)
 
-                # ---- البيانات الحية ----
                 live_data = {
                     "status": status,
                     "score": f"{h_score} - {a_score}",
@@ -321,7 +267,6 @@ def scrape_date(driver, date_str, commentators_list):
                     "minute": minute
                 }
 
-                # تحديث المعلق / القناة إذا كانوا "غير مدرج" وظهرت قيم جديدة
                 existing_live = firebase_get(f"{match_path}/live")
                 if existing_live:
                     if existing_live.get("commentator") == "غير مدرج" and match_comm != "غير مدرج":
@@ -329,7 +274,6 @@ def scrape_date(driver, date_str, commentators_list):
                     if existing_live.get("channel") == ["غير مدرج"] and match_chan != "غير مدرج":
                         live_data["channel"] = [match_chan]
 
-                # رفع البيانات إذا كان هناك تغيير
                 if existing_live != live_data:
                     firebase_patch(f"{match_path}/live", live_data)
 
