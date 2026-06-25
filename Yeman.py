@@ -95,33 +95,48 @@ def firebase_patch(path, data):
         print(f"❌ Firebase Error: {e}")
 
 # =========================
+# COMMENTATORS STORAGE
+# =========================
+
+def save_commentators_to_firebase(date_str, commentators_list):
+    """تخزين المعلقين في مسار commentators/{date_str}"""
+    firebase_patch(f"commentators/{date_str}", commentators_list)
+
+def get_commentators_from_firebase(date_str):
+    """استرجاع المعلقين المخزنين لتاريخ معين"""
+    data = firebase_get(f"commentators/{date_str}")
+    if data and isinstance(data, list):
+        return data
+    return []
+
+# =========================
 # SCRAPING LOGIC
 # =========================
 
 def extract_commentators(driver):
+    """جلب جميع المعلقين من الصفحة (بما فيهم المنتهية إن وُجدت)"""
     driver.get(COMMENTATORS_URL)
     try:
         WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, ".mt-league"))
+            EC.presence_of_element_located((By.CSS_SELECTOR, ".mt-match"))
         )
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         commentators = []
-        league_blocks = soup.find_all('div', class_='mt-league')
-        for league in league_blocks:
-            league_name = league.find('h3').get_text(strip=True) if league.find('h3') else ''
-            next_elem = league.find_next_sibling()
-            while next_elem and 'mt-league' not in next_elem.get('class', []):
-                if 'mt-match' in next_elem.get('class', []):
-                    teams = next_elem.find_all('div', class_='mt-team')
-                    if len(teams) >= 2:
-                        commentators.append({
-                            'league': league_name,
-                            'home': teams[0].get_text(strip=True),
-                            'away': teams[1].get_text(strip=True),
-                            'commentator': next_elem.find('div', class_='mt-commentator').get_text(strip=True) if next_elem.find('div', class_='mt-commentator') else '',
-                            'channel': next_elem.find('div', class_='mt-channel').get_text(strip=True) if next_elem.find('div', class_='mt-channel') else ''
-                        })
-                next_elem = next_elem.find_next_sibling()
+        # نجلب جميع المباريات مباشرة بغض النظر عن مكانها في الشجرة
+        matches = soup.find_all('div', class_='mt-match')
+        for match in matches:
+            teams = match.find_all('div', class_='mt-team')
+            if len(teams) >= 2:
+                # نحاول الحصول على اسم الدوري من العنصر الأب إن وجد
+                league_elem = match.find_parent('div', class_='mt-league')
+                league_name = league_elem.find('h3').get_text(strip=True) if league_elem and league_elem.find('h3') else ''
+                commentators.append({
+                    'league': league_name,
+                    'home': teams[0].get_text(strip=True),
+                    'away': teams[1].get_text(strip=True),
+                    'commentator': match.find('div', class_='mt-commentator').get_text(strip=True) if match.find('div', class_='mt-commentator') else '',
+                    'channel': match.find('div', class_='mt-channel').get_text(strip=True) if match.find('div', class_='mt-channel') else ''
+                })
         return commentators
     except:
         return []
@@ -195,17 +210,15 @@ def scrape_date(driver, date_str, commentators_list):
                 a_logo = next_elem.find('img', class_='match-slim__team-away-logo')['src'] if next_elem.find('img', class_='match-slim__team-away-logo') else ''
                 m_time = next_elem.find('span', class_='match-slim__time').get_text(strip=True) if next_elem.find('span', class_='match-slim__time') else ''
 
-                # النتيجة (تعمل حاليًا)
+                # النتيجة
                 h_score = next_elem.find('span', class_='match-slim__scores-home').get_text(strip=True) if next_elem.find('span', class_='match-slim__scores-home') else '-'
                 a_score = next_elem.find('span', class_='match-slim__scores-away').get_text(strip=True) if next_elem.find('span', class_='match-slim__scores-away') else '-'
 
-                # ---- تحديد الحالة والدقيقة ----
+                # تحديد الحالة والدقيقة
                 if h_score != '-' and a_score != '-':
                     if date_str == now_aden_str:
                         status = "مباشر"
-                        # محاولة استخراج الدقيقة
                         minute = ""
-                        # المحاولة 1: وسم معين
                         minute_elem = (
                             next_elem.find('span', class_='match-slim__minute') or
                             next_elem.find('span', class_='match-slim__status') or
@@ -216,8 +229,6 @@ def scrape_date(driver, date_str, commentators_list):
                             text = minute_elem.get_text(strip=True)
                             if text and ("'" in text or text in ["HT", "FT"]):
                                 minute = text
-
-                        # المحاولة 2: regex على النص الكامل
                         if not minute:
                             full_match_text = next_elem.get_text()
                             match = re.search(r'(\d{1,3}\+?\d*)\s*\'', full_match_text)
@@ -234,7 +245,7 @@ def scrape_date(driver, date_str, commentators_list):
                     status = "لم تبدأ"
                     minute = ""
 
-                # محاولة مطابقة المعلق والقناة
+                # مطابقة المعلق والقناة
                 match_comm = "غير مدرج"
                 match_chan = "غير مدرج"
                 norm_home = normalize_text(home)
@@ -248,6 +259,7 @@ def scrape_date(driver, date_str, commentators_list):
                 match_id = generate_match_id(home, away, league_name)
                 match_path = f"matches/{date_str}/{slug}/{match_id}"
 
+                # static data
                 static_data = {
                     "league": league_name,
                     "league_logo": league_logo,
@@ -260,20 +272,43 @@ def scrape_date(driver, date_str, commentators_list):
                 if not firebase_get(f"{match_path}/static"):
                     firebase_patch(f"{match_path}/static", static_data)
 
+                # live data
                 live_data = {
                     "status": status,
                     "score": f"{h_score} - {a_score}",
-                    "channel": [match_chan],
-                    "commentator": match_comm,
                     "minute": minute
                 }
 
                 existing_live = firebase_get(f"{match_path}/live")
-                if existing_live:
-                    if existing_live.get("commentator") == "غير مدرج" and match_comm != "غير مدرج":
+
+                # --- حماية المعلق ---
+                if match_comm != "غير مدرج":
+                    # لدينا معلق حالي صحيح
+                    if existing_live and existing_live.get("commentator", "غير مدرج") != "غير مدرج":
+                        # القديم صحيح أيضًا، نبقيه إلا إذا تغير الجديد
+                        if match_comm != existing_live["commentator"]:
+                            live_data["commentator"] = match_comm
+                        else:
+                            live_data["commentator"] = existing_live["commentator"]
+                    else:
                         live_data["commentator"] = match_comm
-                    if existing_live.get("channel") == ["غير مدرج"] and match_chan != "غير مدرج":
+                else:
+                    # المعلق الحالي مفقود، نحاول الاحتفاظ بالقديم
+                    old_comm = existing_live.get("commentator") if existing_live else None
+                    live_data["commentator"] = old_comm if old_comm and old_comm != "غير مدرج" else "غير مدرج"
+
+                # --- حماية القناة ---
+                if match_chan != "غير مدرج":
+                    if existing_live and existing_live.get("channel") and existing_live["channel"] != ["غير مدرج"]:
+                        if [match_chan] != existing_live["channel"]:
+                            live_data["channel"] = [match_chan]
+                        else:
+                            live_data["channel"] = existing_live["channel"]
+                    else:
                         live_data["channel"] = [match_chan]
+                else:
+                    old_chan = existing_live.get("channel") if existing_live else None
+                    live_data["channel"] = old_chan if old_chan and old_chan != ["غير مدرج"] else ["غير مدرج"]
 
                 if existing_live != live_data:
                     firebase_patch(f"{match_path}/live", live_data)
@@ -289,16 +324,32 @@ def main():
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     try:
-        print("📡 Fetching today's commentators list...")
-        commentators = extract_commentators(driver)
-        print(f"   Found {len(commentators)} commentator entries")
-
         target_dates = get_target_dates()
         print(f"📅 Target dates: {target_dates}")
+
+        # جلب المعلقين لليوم الحالي وتخزينهم في Firebase
+        today_str = get_now_aden().strftime("%Y-%m-%d")
+        print(f"📡 Fetching today's commentators...")
+        commentators_today = extract_commentators(driver)
+        if commentators_today:
+            print(f"   Found {len(commentators_today)} entries – saving to Firebase")
+            save_commentators_to_firebase(today_str, commentators_today)
+        else:
+            print("   No commentators found for today, will rely on stored data.")
 
         for date_str in target_dates:
             print(f"\n⚽ Processing date: {date_str}")
             navigate_to_date(driver, date_str)
+
+            # اختيار مصدر المعلقين
+            if date_str == today_str:
+                commentators = commentators_today
+            else:
+                commentators = get_commentators_from_firebase(date_str)
+                if not commentators:
+                    print(f"   ⚠️ No stored commentators for {date_str}, trying live page (may fail)")
+                    commentators = extract_commentators(driver)
+
             scrape_date(driver, date_str, commentators)
 
         print("\n✅ All dates processed successfully.")
