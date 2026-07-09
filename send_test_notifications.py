@@ -5,7 +5,11 @@ import pytz
 import os
 
 # ---------- CONFIG ----------
-FIREBASE_URL = os.getenv("FIREBASE_URL")   # نفس المتغير المستخدم في السكربت الأول
+FIREBASE_URL = os.getenv("FIREBASE_URL")
+if not FIREBASE_URL:
+    print("❌ FIREBASE_URL غير مضبوط. استخدم export FIREBASE_URL='...'")
+    exit(1)
+
 FLASK_SEND_URL = "https://lnadeem.pythonanywhere.com/send"
 
 # ---------- HELPERS ----------
@@ -14,10 +18,20 @@ def get_now_aden():
 
 def firebase_get(path):
     url = f"{FIREBASE_URL}/{path}.json"
+    print(f"   📡 GET {url}")
     try:
         r = requests.get(url, timeout=10)
-        return r.json() if r.status_code == 200 else None
-    except:
+        print(f"   🔁 Status: {r.status_code}")
+        if r.status_code == 200:
+            data = r.json()
+            if data is None:
+                print("   ⚠️ البيانات فارغة (null)")
+            return data
+        else:
+            print(f"   ❌ استجابة غير 200: {r.text[:200]}")
+            return None
+    except Exception as e:
+        print(f"   ❌ استثناء: {e}")
         return None
 
 def firebase_patch(path, data):
@@ -25,6 +39,8 @@ def firebase_patch(path, data):
     try:
         r = requests.patch(url, json=data, timeout=20)
         print(f"🔥 Firebase Patch [{path}]: {r.status_code}")
+        if r.status_code != 200:
+            print(f"   Response: {r.text[:200]}")
     except Exception as e:
         print(f"❌ Firebase Error: {e}")
 
@@ -33,15 +49,17 @@ def send_notification(title, body):
     try:
         r = requests.post(FLASK_SEND_URL, json=payload, timeout=10)
         print(f"📢 Sent: {title} -> {r.status_code}")
+        if r.status_code != 200:
+            print(f"   Response: {r.text[:200]}")
     except Exception as e:
         print(f"❌ Notification failed: {e}")
 
-# ---------- NOTIFICATION BUILDER (مطابقة للسكربت الأول) ----------
+# ---------- NOTIFICATION BUILDER ----------
 def build_notification(event):
-    ev_type = event["type"]
-    player = event["player"]
-    minute = event["minute"]
-    score = event.get("score", "")   # يمكنك إضافتها يدويًا إذا أردت
+    ev_type = event.get("type", "حدث آخر")
+    player = event.get("player", "")
+    minute = event.get("minute", "")
+    score = event.get("score", "")
 
     if ev_type == 'هدف':
         title = "⚽ هدف!"
@@ -71,24 +89,43 @@ def build_notification(event):
 
 # ---------- MAIN ----------
 def send_scheduled_events():
-    # حدد المباراة التي نعمل عليها (نفس بيانات الاختبار)
     match_date = "2026-07-07"
     match_id = "b6771feb06522a4042497acda60c89e3"
     league_slug = "كأس-العالم"
-    #events_path = f"test_notifications/{match_date}/{match_id}/events"
     events_path = f"test_notifications/{match_date}/{league_slug}/{match_id}/events"
 
     print(f"🔍 Checking scheduled events in {events_path}")
     events = firebase_get(events_path)
-    if not events:
-        print("No events found.")
+
+    # إذا كانت البيانات داخل كائن وليس قائمة مباشرة
+    if events is None:
+        print("❌ فشل في جلب البيانات، تحقق من FIREBASE_URL والمسار.")
         return
+
+    if isinstance(events, dict):
+        # ربما البيانات ملفوفة بمفتاح إضافي
+        print("   ⚠️ البيانات وردت ككائن وليست قائمة، محاولة استخراج القائمة...")
+        # جرب المفتاح 'events' إن وجد
+        if 'events' in events:
+            events = events['events']
+        else:
+            # ربما كل القيم هي الأحداث
+            events = list(events.values())
+
+    if not isinstance(events, list):
+        print(f"❌ تنسيق غير متوقع: {type(events)}")
+        return
+
+    if len(events) == 0:
+        print("   لا توجد أحداث مخزنة.")
+        return
+
+    print(f"   ✅ تم جلب {len(events)} حدثًا.")
 
     now_aden = get_now_aden()
     updates = {}
 
     for idx, ev in enumerate(events):
-        # تجاهل إذا أُرسل سابقاً
         if ev.get("sent", False):
             continue
 
@@ -96,25 +133,26 @@ def send_scheduled_events():
         if not scheduled_str:
             continue
 
-        # تحويل النص إلى كائن وقت (بافتراض التنسيق "%Y-%m-%dT%H:%M:%S%z")
         try:
+            # تنسيق الوقت الذي استخدمناه: "2026-07-09T05:00:26+0300"
             scheduled_dt = datetime.strptime(scheduled_str, "%Y-%m-%dT%H:%M:%S%z")
-        except:
-            # في حال تنسيق مختلف، تجاهل
-            print(f"⚠️ Invalid date format for event index {idx}: {scheduled_str}")
+        except Exception as e:
+            print(f"⚠️ تنسيق وقت خاطئ للحدث {idx}: {scheduled_str} | {e}")
             continue
 
-        # إذا حان وقت الإرسال (الوقت المجدول <= الآن)
-        if scheduled_dt <= now_aden:
+        # للتجربة: تجاهل شرط الوقت وأرسل كل الأحداث غير المرسلة (مؤقتًا)
+        if scheduled_dt <= now_aden:   # أو استخدم True للتجربة
             title, body = build_notification(ev)
             send_notification(title, body)
             updates[f"{idx}/sent"] = True
+            # لتجنب إرسال مئات الإشعارات دفعة واحدة، أضف تأخيرًا بسيطًا
+            # time.sleep(1)
 
     if updates:
         firebase_patch(events_path, updates)
-        print(f"✅ Marked {len(updates)} events as sent.")
+        print(f"✅ تم تعليم {len(updates)} حدثًا كـ 'مرسل'.")
     else:
-        print("No pending events to send at this time.")
+        print("   لا توجد أحداث مستحقة للإرسال (أو أن وقتها لم يحن بعد).")
 
 if __name__ == "__main__":
     send_scheduled_events()
