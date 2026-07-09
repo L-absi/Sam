@@ -157,6 +157,11 @@ def fetch_specific_match():
         print(f"   ✅ Stored {len(new_events)} new events with future send time.")
     else:
         print("   No new events.")
+# داخل دالة fetch_specific_match، بعد جلب resp.text
+    print("--- أول 1500 حرف من الصفحة ---")
+    print(resp.text[:1500])
+
+# يمكنك أيضًا حفظ الصفحة كاملة لفحصها لاحقًا
 
 if __name__ == "__main__":
     fetch_specific_match()
