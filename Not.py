@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-import json, re, hashlib, time, requests
+import json, re, os, time, requests
 from datetime import datetime, timedelta
-import pytz, os
+import pytz
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 # ---------- CONFIG ----------
-FIREBASE_URL = os.getenv("FIREBASE_URL")   # يجب تعيينه في البيئة
+FIREBASE_URL = os.getenv("FIREBASE_URL")   # مطلوب في البيئة
 BASE_MATCH_URL = "https://as-goal.net/match"
 
 # ---------- HELPERS ----------
@@ -32,123 +34,146 @@ def firebase_put(path, data):
     except Exception as e:
         print(f"❌ Firebase Error: {e}")
 
-# ---------- PARSING FUNCTIONS ----------
-def detect_event_type(icon_src, text):
-    if icon_src:
-        if 'goal' in icon_src.lower():
-            return 'هدف'
-        if 'yellow-card' in icon_src.lower():
-            return 'بطاقة صفراء'
-        if 'red-card' in icon_src.lower():
-            return 'بطاقة حمراء'
-        if 'substitution' in icon_src.lower():
-            return 'استبدال'
-    if 'هدف' in text:
-        return 'هدف'
-    if 'بطاقة صفراء' in text:
-        return 'بطاقة صفراء'
-    if 'بطاقة حمراء' in text:
-        return 'بطاقة حمراء'
-    if 'استبدال' in text:
-        return 'استبدال'
-    if 'استراحة' in text or 'الشوط الأول' in text or 'الشوط الثاني' in text:
-        return 'استراحة'
-    if 'نهاية المباراة' in text or 'انتهت المباراة' in text:
-        return 'نهاية المباراة'
-    if 'شوط إضافي' in text:
-        return 'بداية شوط إضافي'
-    return 'حدث آخر'
-
-def extract_player_from_text(text, event_type):
-    if event_type == 'هدف':
-        parts = text.split('سجل', 1)
-        if len(parts) > 1:
-            return parts[1].strip()
-        parts = text.split('لـ', 1)
-        if len(parts) > 1:
-            return parts[1].strip()
-    elif event_type in ['بطاقة صفراء', 'بطاقة حمراء']:
-        parts = text.split('لـ', 1)
-        if len(parts) > 1:
-            return parts[1].strip()
-    elif event_type == 'استبدال':
-        match = re.search(r'خروج (.+?) – دخول (.+)', text)
-        if match:
-            return f"خروج: {match.group(1)} – دخول: {match.group(2)}"
-    return ""
-
-def parse_events(html, home_team, away_team):
-    soup = BeautifulSoup(html, 'html.parser')
-    score_elem = soup.select_one('.match-score')
-    minute_elem = soup.select_one('.match-minute')
-    current_score = score_elem.get_text(strip=True) if score_elem else "- -"
-    current_minute = minute_elem.get_text(strip=True) if minute_elem else ""
-
+# ---------- EVENT PARSER FROM VISIBLE TEXT ----------
+def parse_events_from_visible_text(visible_text):
+    """
+    يحلل النص المرئي المستخرج من قسم 'الاحداث' في الصفحة.
+    النمط المتوقع (كل حدث مفصول بسطر يحتوي على الدقيقة):
+    15'
+    0:1
+    هدف
+    Y. Ibrahim El Hanafi
+    صناعة: M. Attia
+    ...
+    """
+    lines = [line.strip() for line in visible_text.splitlines() if line.strip()]
     events = []
-    timeline = soup.find('div', class_='match-timeline')
-    if not timeline:
-        return events, current_score, current_minute
+    i = 0
+    while i < len(lines):
+        # الدقيقة تبدأ برقم متبوع بـ ' أو تحتوي على '+'
+        if re.match(r"^\d{1,3}'(\+\d+)?$", lines[i]) or re.match(r"^\d{1,3}\+?\d*$", lines[i]):
+            minute = lines[i]
+            i += 1
+            event_data = {"minute": minute, "type": "حدث آخر", "player": "", "extra": "", "raw": []}
 
-    event_items = timeline.find_all('div', class_='event')
-    for item in event_items:
-        minute = item.find('div', class_='event-minute')
-        text = item.find('div', class_='event-text')
-        icon = item.find('img', class_='event-icon')
-        minute_str = minute.get_text(strip=True) if minute else ""
-        event_text = text.get_text(strip=True) if text else ""
-        icon_src = icon['src'] if icon else ""
-        event_type = detect_event_type(icon_src, event_text)
-        player = extract_player_from_text(event_text, event_type)
-        events.append({
-            "minute": minute_str,
-            "type": event_type,
-            "player": player,
-            "extra": "",
-            "raw": event_text
-        })
-    return events, current_score, current_minute
+            # اجمع السطور التالية حتى بداية الحدث التالي أو نهاية القائمة
+            while i < len(lines) and not re.match(r"^\d{1,3}'", lines[i]) and not lines[i].startswith("الشوط"):
+                event_data["raw"].append(lines[i])
+                i += 1
 
-# ---------- TEST FETCH WITH SELENIUM ----------
+            full_text = " | ".join(event_data["raw"])
+            event_data["raw_text"] = full_text
+
+            # استخراج النتيجة (مثلاً 0:1)
+            score_match = re.search(r"(\d+:\d+)", full_text)
+            if score_match:
+                event_data["score"] = score_match.group(1)
+
+            # تحديد نوع الحدث
+            if "هدف" in full_text:
+                event_data["type"] = "هدف"
+                parts = full_text.split("هدف")[-1].strip()
+                player_part = parts.split("صناعة:")[0].strip()
+                event_data["player"] = player_part if player_part else ""
+            elif "بطاقة صفراء" in full_text:
+                event_data["type"] = "بطاقة صفراء"
+                player = full_text.split("بطاقة صفراء")[-1].strip()
+                event_data["player"] = player
+            elif "بطاقة حمراء" in full_text:
+                event_data["type"] = "بطاقة حمراء"
+                player = full_text.split("بطاقة حمراء")[-1].strip()
+                event_data["player"] = player
+            elif "تبديل" in full_text:
+                event_data["type"] = "استبدال"
+                enter = re.search(r"دخول:\s*(.+)", full_text)
+                exit_ = re.search(r"خروج:\s*(.+)", full_text)
+                if enter and exit_:
+                    event_data["player"] = f"خروج: {exit_.group(1)} – دخول: {enter.group(1)}"
+            elif "VAR" in full_text:
+                event_data["type"] = "VAR"
+                event_data["player"] = full_text.replace("VAR", "").strip()
+            elif "ركلة ترجيح" in full_text:
+                event_data["type"] = "ركلة ترجيح"
+                event_data["player"] = ""
+            else:
+                event_data["type"] = "حدث آخر"
+
+            events.append(event_data)
+        else:
+            i += 1
+
+    return events
+
+# ---------- MAIN FETCH FUNCTION (FIREBASE VERSION) ----------
 def fetch_specific_match():
     match_date = "2026-07-07"
     home = "الارجنتين"
     away = "مصر"
-    league_slug = "كأس-العالم"
+    league_slug = "كأس-العالم"   # يُستخدم في مسار Firebase
     match_id = "b6771feb06522a4042497acda60c89e3"
     url = f"{BASE_MATCH_URL}/{home}-{away}-{match_date}/"
 
-    # إعداد Selenium
+    # إعداد Chrome (يدعم Termux وبيئات أخرى)
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    # قد تحتاج تحديد ثنائي Chrome في بعض البيئات (اختياري):
-    # options.binary_location = "/usr/bin/google-chrome"
+    options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_argument('window-size=1920,1080')
+    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+    options.add_experimental_option('excludeSwitches', ['enable-automation'])
+    options.add_experimental_option('useAutomationExtension', False)
 
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    chromedriver_path = '/data/data/com.termux/files/usr/bin/chromedriver'
+    if os.path.exists(chromedriver_path):
+        service = Service(chromedriver_path)
+    else:
+        from webdriver_manager.chrome import ChromeDriverManager
+        service = Service(ChromeDriverManager().install())
+
+    driver = webdriver.Chrome(service=service, options=options)
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
     try:
-        print(f"🔍 [TEST] Loading with Selenium: {url}")
+        print(f"🔍 [TEST] Loading: {url}")
         driver.get(url)
-        # انتظر تحميل الصفحة (يمكن تحسينه بانتظار عنصر محدد)
-        time.sleep(5)
+
+        # انتظر تبويب "الاحداث" وانقر عليه إن وُجد
+        wait = WebDriverWait(driver, 20)
+        try:
+            events_tab = wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(@class,'match-tabs')]//span[contains(text(),'الاحداث')]")))
+            driver.execute_script("arguments[0].click();", events_tab)
+            print("✅ تم النقر على تبويب 'الاحداث'")
+            time.sleep(3)
+        except Exception as e:
+            print(f"⚠️ تعذر النقر على تبويب الأحداث (قد يكون غير ضروري): {e}")
+
         html = driver.page_source
+        soup = BeautifulSoup(html, 'html.parser')
 
-        # فحص سريع لوجود التايملاين
-        if 'match-timeline' in html:
-            print("✅ تم العثور على 'match-timeline'")
+        # استخراج النتيجة والدقيقة (عدّل المحددات حسب هيكل الصفحة الفعلي)
+        score_elem = soup.select_one('.match-scoreboard__scores')
+        minute_elem = soup.select_one('.match-scoreboard__status')
+        current_score = score_elem.get_text(strip=True) if score_elem else "- -"
+        current_minute = minute_elem.get_text(strip=True) if minute_elem else ""
+
+        # استخراج قسم الأحداث
+        events_section = soup.find('div', class_='match-event-list') or soup.find('div', id='match-events')
+        if events_section:
+            visible_text = events_section.get_text(separator='\n', strip=True)
         else:
-            print("❌ لم يتم العثور على 'match-timeline' – قد تكون الأصناف مختلفة")
-            # طباعة جزء من الصفحة لتشخيص المشكلة (اختياري)
-            print(html[2000:3500])
+            visible_text = soup.get_text(separator='\n', strip=True)
 
-        events, current_score, current_minute = parse_events(html, home, away)
-        print(f"   Found {len(events)} events, score={current_score}, minute={current_minute}")
+        print(f"📋 النص المستخرج من الأحداث:\n{visible_text[:1000]}...")
 
-        # حفظ في مسار الاختبار
-        base_path = f"test_notifications/{match_date}/{match_id}"
+        events = parse_events_from_visible_text(visible_text)
+        print(f"   الأحداث المستخرجة: {len(events)}")
+
+        # مسار التخزين في Firebase
+        base_path = f"test_notifications/{match_date}/{league_slug}/{match_id}"
         events_path = f"{base_path}/events"
 
+        # جلب الأحداث المخزنة سابقاً
         stored_events = firebase_get(events_path) or []
         existing_sigs = set()
         for ev in stored_events:
@@ -169,9 +194,9 @@ def fetch_specific_match():
         if new_events:
             all_events = stored_events + new_events
             firebase_put(events_path, all_events)
-            print(f"   ✅ Stored {len(new_events)} new events with future send time.")
+            print(f"   ✅ تمت إضافة {len(new_events)} أحداث جديدة إلى Firebase.")
         else:
-            print("   No new events (or all already stored).")
+            print("   لا توجد أحداث جديدة.")
 
     finally:
         driver.quit()
