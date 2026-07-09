@@ -1,5 +1,4 @@
-name: Update Matches Every 5 Minutes
-
+name: Scheduled Send Notifications
 on:
   #schedule:
     # هذا الكود يعني التشغيل كل 5 دقائق
