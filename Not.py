@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 import json, re, hashlib, time, requests
 from datetime import datetime, timedelta
-import pytz
-import os
+import pytz, os
 from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
 # ---------- CONFIG ----------
 FIREBASE_URL = os.getenv("FIREBASE_URL")   # يجب تعيينه في البيئة
@@ -105,63 +108,73 @@ def parse_events(html, home_team, away_team):
         })
     return events, current_score, current_minute
 
-# ---------- TEST FETCH FOR SPECIFIC MATCH ----------
+# ---------- TEST FETCH WITH SELENIUM ----------
 def fetch_specific_match():
-    # بيانات المباراة المحددة (الأرجنتين - مصر)
     match_date = "2026-07-07"
     home = "الارجنتين"
     away = "مصر"
-    league_slug = "كأس-العالم"          # slug المستخدم في قاعدة بياناتك
-    match_id = "b6771feb06522a4042497acda60c89e3"  # من الرابط الذي شاركته
-
+    league_slug = "كأس-العالم"
+    match_id = "b6771feb06522a4042497acda60c89e3"
     url = f"{BASE_MATCH_URL}/{home}-{away}-{match_date}/"
-    print(f"🔍 [TEST] Scraping {url}")
+
+    # إعداد Selenium
+    options = Options()
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    # قد تحتاج تحديد ثنائي Chrome في بعض البيئات (اختياري):
+    # options.binary_location = "/usr/bin/google-chrome"
+
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     try:
-        resp = requests.get(url, timeout=15)
-        resp.raise_for_status()
-        html = resp.text
-    except Exception as e:
-        print(f"❌ Failed to fetch page: {e}")
-        return
+        print(f"🔍 [TEST] Loading with Selenium: {url}")
+        driver.get(url)
+        # انتظر تحميل الصفحة (يمكن تحسينه بانتظار عنصر محدد)
+        time.sleep(5)
+        html = driver.page_source
 
-    events, current_score, current_minute = parse_events(html, home, away)
-    print(f"   Found {len(events)} events, score={current_score}, minute={current_minute}")
+        # فحص سريع لوجود التايملاين
+        if 'match-timeline' in html:
+            print("✅ تم العثور على 'match-timeline'")
+        else:
+            print("❌ لم يتم العثور على 'match-timeline' – قد تكون الأصناف مختلفة")
+            # طباعة جزء من الصفحة لتشخيص المشكلة (اختياري)
+            print(html[2000:3500])
 
-    # حفظ في مسار test_notifications/{date}/{match_id}/
-    base_path = f"test_notifications/{match_date}/{match_id}"
-    events_path = f"{base_path}/events"
+        events, current_score, current_minute = parse_events(html, home, away)
+        print(f"   Found {len(events)} events, score={current_score}, minute={current_minute}")
 
-    # تحميل الأحداث القديمة المخزنة (إن وجدت) لتجنب التكرار
-    stored_events = firebase_get(events_path) or []
-    existing_sigs = set()
-    for ev in stored_events:
-        sig = f"{ev.get('minute','')}|{ev.get('type','')}|{ev.get('player','')}"
-        existing_sigs.add(sig)
+        # حفظ في مسار الاختبار
+        base_path = f"test_notifications/{match_date}/{match_id}"
+        events_path = f"{base_path}/events"
 
-    new_events = []
-    now = get_now_aden()
-    for ev in events:
-        sig = f"{ev['minute']}|{ev['type']}|{ev['player']}"
-        if sig not in existing_sigs:
-            # إضافة وقت إرسال مجدول (بعد 5 دقائق من الآن)
-            scheduled_time = now + timedelta(minutes=5)
-            ev['scheduled_send_time'] = scheduled_time.strftime("%Y-%m-%dT%H:%M:%S%z")
-            ev['sent'] = False          # لم يُرسل بعد
-            new_events.append(ev)
+        stored_events = firebase_get(events_path) or []
+        existing_sigs = set()
+        for ev in stored_events:
+            sig = f"{ev.get('minute','')}|{ev.get('type','')}|{ev.get('player','')}"
             existing_sigs.add(sig)
 
-    if new_events:
-        all_events = stored_events + new_events
-        firebase_put(events_path, all_events)
-        print(f"   ✅ Stored {len(new_events)} new events with future send time.")
-    else:
-        print("   No new events.")
-# داخل دالة fetch_specific_match، بعد جلب resp.text
-    print("--- أول 1500 حرف من الصفحة ---")
-    print(resp.text[:1500])
+        new_events = []
+        now = get_now_aden()
+        for ev in events:
+            sig = f"{ev['minute']}|{ev['type']}|{ev['player']}"
+            if sig not in existing_sigs:
+                scheduled_time = now + timedelta(minutes=5)
+                ev['scheduled_send_time'] = scheduled_time.strftime("%Y-%m-%dT%H:%M:%S%z")
+                ev['sent'] = False
+                new_events.append(ev)
+                existing_sigs.add(sig)
 
-# يمكنك أيضًا حفظ الصفحة كاملة لفحصها لاحقًا
+        if new_events:
+            all_events = stored_events + new_events
+            firebase_put(events_path, all_events)
+            print(f"   ✅ Stored {len(new_events)} new events with future send time.")
+        else:
+            print("   No new events (or all already stored).")
+
+    finally:
+        driver.quit()
 
 if __name__ == "__main__":
     fetch_specific_match()
