@@ -49,4 +49,5 @@ jobs:
         env:
           FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
           TZ: 'Asia/Aden'
-        run: python YemanNew.py
+        run: python Neww.py
+        #YemanNew.py
