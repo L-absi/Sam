@@ -130,6 +130,8 @@ def should_update_live(existing_live, new_live_data):
                 # إذا كانت القيم الجديدة تشير إلى "لم تبدأ" أو نتيجة فارغة، نرفض التحديث
                 if new_status == "لم تبدأ" or new_score in ("- -", "? - ?", ""):
                     return False  # لا نحدث
+        except:
+            pass
     return True
 
 # =========================
