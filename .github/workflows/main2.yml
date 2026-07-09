@@ -28,7 +28,7 @@ jobs:
 
       - name: Run Scraper
         env:
-          FIREBASE_URL2: ${{ secrets.FIREBASE_URL2 }}
+          FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
           TZ: 'Asia/Aden' # تحديد المنطقة الزمنية هنا أيضاً
         run: python send_test_notifications.py
         
