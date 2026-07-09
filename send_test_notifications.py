@@ -74,6 +74,7 @@ def send_scheduled_events():
     # حدد المباراة التي نعمل عليها (نفس بيانات الاختبار)
     match_date = "2026-07-07"
     match_id = "b6771feb06522a4042497acda60c89e3"
+    league_slug = "كأس-العالم"
     #events_path = f"test_notifications/{match_date}/{match_id}/events"
     events_path = f"test_notifications/{match_date}/{league_slug}/{match_id}/events"
 
