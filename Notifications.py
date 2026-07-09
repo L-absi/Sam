@@ -2,6 +2,7 @@
 import json, re, hashlib, time, requests
 from datetime import datetime
 import pytz
+import os
 from bs4 import BeautifulSoup
 
 # ---------- CONFIG ----------
