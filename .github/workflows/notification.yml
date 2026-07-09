@@ -7,11 +7,11 @@ on:
   # هذا هو المحرّك الحقيقي للتشغيل كل 3 دقائق، يُستدعى من خدمة خارجية مجانية
   workflow_dispatch:
   repository_dispatch:
-    types: [scrape-matches]
+    types: [scrape-notifications]
 
 # يمنع تراكم تشغيلات متوازية إذا تأخر تشغيل سابق
 concurrency:
-  group: scrape-matches
+  group: scrape-notifications
   cancel-in-progress: true
 
 jobs:
