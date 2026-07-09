@@ -30,4 +30,5 @@ jobs:
         env:
           FIREBASE_URL2: ${{ secrets.FIREBASE_URL2 }}
           TZ: 'Asia/Aden' # تحديد المنطقة الزمنية هنا أيضاً
-        run: python fil.py
+        run: python send_test_notifications.py
+        
