@@ -1,80 +1,122 @@
 const admin = require('firebase-admin');
 
-// 1. تحميل ملف حساب الخدمة وتهيئة التطبيق
-
-// يقرأ بيانات الاعتماد من متغير البيئة الذي يوفره GitHub Actions
-const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
+// يقرأ بيانات الاعتماد من متغير البيئة (GitHub Actions) أو من الملف محليًا
+const serviceAccount = process.env.FIREBASE_CREDENTIALS
+  ? JSON.parse(process.env.FIREBASE_CREDENTIALS)
+  : require('./firebase-service-account.json');
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount),
 });
 
 const db = admin.firestore();
 
+/** تحويل معرف مثل general_surgery إلى "General Surgery" */
+function readableId(value) {
+  return value
+    .replace(/_/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
 async function buildReferenceIndex() {
-  console.log('🚀 بدء بناء فهرس المراجع...');
+  console.log('🚀 Starting reference index build…');
 
-  // 2. جلب جميع الأسئلة من كل التخصصات والمواضيع باستخدام collectionGroup
   const questionsSnapshot = await db.collectionGroup('questions').get();
-  console.log(`📄 تم العثور على ${questionsSnapshot.size} سؤالاً.`);
+  console.log(`📄 Found ${questionsSnapshot.size} questions.`);
 
-  const index = new Map(); // المفتاح: bookName
+  const index = new Map(); // key: bookName
 
-  // 3. المرور على كل سؤال وتجميع البيانات
-  questionsSnapshot.forEach(doc => {
+  questionsSnapshot.forEach((doc) => {
     const data = doc.data();
-    const bookName = data.source?.bookName || data.questionData?.source?.bookName;
-    if (!bookName) return; // تخطي الأسئلة التي لا تحتوي على اسم مرجع
+    const bookName =
+      data.source?.bookName || data.questionData?.source?.bookName;
+    if (!bookName) return;
 
-    // استخراج معرفات التخصص والموضوع من مسار المستند
+    const trimmedBook = bookName.trim();
+    if (!trimmedBook) return;
+
     const pathParts = doc.ref.path.split('/');
+    if (pathParts.length < 6) return;
     const specialtyId = pathParts[1];
     const subjectId = pathParts[3];
 
-    // إذا كان المرجع غير موجود في الذاكرة، قم بإنشاء إدخال جديد له
-    if (!index.has(bookName)) {
-      index.set(bookName, {
-        bookName: bookName,
+    const title = readableId(
+      subjectId.replace(new RegExp(`^${specialtyId}_`), '')
+    );
+    const specialtyTitle = readableId(specialtyId);
+
+    if (!index.has(trimmedBook)) {
+      index.set(trimmedBook, {
+        bookName: trimmedBook,
         questionCount: 0,
-        topics: new Map(), // المفتاح: specialtyId/subjectId
+        topics: new Map(),
       });
     }
-    const entry = index.get(bookName);
+    const entry = index.get(trimmedBook);
     entry.questionCount++;
 
-    // تجميع الإحصائيات لكل موضوع داخل المرجع
     const topicKey = `${specialtyId}/${subjectId}`;
     if (!entry.topics.has(topicKey)) {
       entry.topics.set(topicKey, {
-        specialtyId: specialtyId,
-        subjectId: subjectId,
+        specialtyId,
+        subjectId,
+        title,
+        specialtyTitle,
         questionCount: 0,
       });
     }
     entry.topics.get(topicKey).questionCount++;
   });
 
-  // 4. تحويل البيانات المجمعة إلى الشكل النهائي والكتابة إلى Firestore
-  const batch = db.batch();
+  // نحذف المستندات القديمة ثم نكتب الجديدة بدفعات
+  const existing = await db.collection('reference_index').get();
+  const deleteBatch = db.batch();
+  existing.forEach((d) => deleteBatch.delete(d.ref));
+  if (!existing.empty) {
+    await deleteBatch.commit();
+    console.log(`🗑️ Cleared ${existing.size} old index documents.`);
+  }
+
   let referenceCount = 0;
+  let batch = db.batch();
+  let batchCount = 0;
 
-  for (const [bookName, entry] of index) {
-    const topicsArray = Array.from(entry.topics.values());
-    const docRef = db.collection('reference_index').doc(bookName); // اسم المستند هو اسم المرجع
+  for (const [, entry] of index) {
+    const topicsArray = Array.from(entry.topics.values()).sort((a, b) => {
+      if (a.specialtyTitle !== b.specialtyTitle)
+        return a.specialtyTitle.localeCompare(b.specialtyTitle);
+      return a.title.localeCompare(b.title);
+    });
 
+    const docRef = db.collection('reference_index').doc(); // auto ID
     batch.set(docRef, {
-      bookName: bookName,
+      bookName: entry.bookName,
       questionCount: entry.questionCount,
       topicCount: topicsArray.length,
       topics: topicsArray,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     referenceCount++;
+    batchCount++;
+
+    if (batchCount === 400) {
+      await batch.commit();
+      batch = db.batch();
+      batchCount = 0;
+    }
   }
 
-  // 5. تنفيذ جميع عمليات الكتابة دفعة واحدة
-  await batch.commit();
-  console.log(`✅ تم بناء الفهرس بنجاح! تمت كتابة ${referenceCount} مرجعاً إلى مجموعة 'reference_index'.`);
+  if (batchCount > 0) await batch.commit();
+
+  console.log(
+    `✅ Index build complete: ${referenceCount} references written to 'reference_index'.`
+  );
 }
 
-buildReferenceIndex().catch(console.error);
+buildReferenceIndex().catch((err) => {
+  console.error('❌ Failed:', err);
+  process.exit(1);
+});
