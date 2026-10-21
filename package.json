@@ -1,0 +1,17 @@
+{
+  "name": "boardtest-indexer",
+  "version": "1.0.0",
+  "description": "Builds the reference_index collection in Firestore for BoardTest",
+  "main": "build-index.js",
+  "scripts": {
+    "build-index": "node build-index.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "private": true
+}
