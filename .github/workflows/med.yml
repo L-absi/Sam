@@ -1,0 +1,30 @@
+name: Build Reference Index
+
+on:
+  schedule:
+    # يحدد هذا السطر موعد التشغيل (يعمل بتوقيت UTC)
+    # "0 3 * * *" تعني الساعة 3:00 صباحًا بتوقيت UTC كل يوم[reference:5]
+    - cron: '0 3 * * *'
+  # يتيح لك هذا السطر تشغيل السكربت يدويًا من واجهة GitHub[reference:6]
+  workflow_dispatch:
+
+jobs:
+  build-index:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # أو '22' حسب تفضيلك[reference:7]
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run index builder script
+        env:
+          # هنا نمرر السر إلى السكربت كمتغير بيئة باسم FIREBASE_CREDENTIALS
+          FIREBASE_CREDENTIALS: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node build-index.js
