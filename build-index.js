@@ -1,7 +1,9 @@
 const admin = require('firebase-admin');
 
 // 1. تحميل ملف حساب الخدمة وتهيئة التطبيق
-const serviceAccount = require('./firebase-service-account.json');
+
+// يقرأ بيانات الاعتماد من متغير البيئة الذي يوفره GitHub Actions
+const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
